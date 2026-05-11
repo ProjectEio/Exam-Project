@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.exam.module.score.mapper.ScoreMapper">
+
+    <select id="pageWithJoin" resultType="com.exam.module.score.entity.Score">
+        SELECT s.*, u.real_name AS studentName,
+               c.course_code AS courseCode, c.course_name AS courseName
+        FROM sys_score s
+        LEFT JOIN sys_user u ON u.id = s.student_id
+        LEFT JOIN sys_course c ON c.id = s.course_id
+        WHERE s.deleted = 0
+        <if test="q.studentId != null">AND s.student_id = #{q.studentId}</if>
+        <if test="q.courseId != null">AND s.course_id = #{q.courseId}</if>
+        <if test="q.examYear != null">AND s.exam_year = #{q.examYear}</if>
+        <if test="q.examTerm != null and q.examTerm != ''">AND s.exam_term = #{q.examTerm}</if>
+        <if test="q.status != null and q.status != ''">AND s.status = #{q.status}</if>
+        <if test="q.keyword != null and q.keyword != ''">
+            AND (u.real_name LIKE '%' || #{q.keyword} || '%' OR c.course_name LIKE '%' || #{q.keyword} || '%')
+        </if>
+        ORDER BY s.exam_year DESC, s.exam_term DESC, s.id DESC
+    </select>
+
+    <select id="listByStudent" resultType="com.exam.module.score.entity.Score">
+        SELECT s.*, u.real_name AS studentName,
+               c.course_code AS courseCode, c.course_name AS courseName
+        FROM sys_score s
+        LEFT JOIN sys_user u ON u.id = s.student_id
+        LEFT JOIN sys_course c ON c.id = s.course_id
+        WHERE s.deleted = 0 AND s.student_id = #{studentId}
+        ORDER BY s.exam_year DESC, s.exam_term DESC, s.id DESC
+    </select>
+</mapper>

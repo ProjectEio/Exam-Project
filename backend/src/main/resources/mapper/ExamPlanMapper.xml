@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.exam.module.plan.mapper.ExamPlanMapper">
+
+    <select id="pageWithJoin" resultType="com.exam.module.plan.entity.ExamPlan">
+        SELECT p.*, c.course_name AS courseName, m.major_name AS majorName
+        FROM sys_exam_plan p
+        LEFT JOIN sys_course c ON c.id = p.course_id
+        LEFT JOIN sys_major  m ON m.id = p.major_id
+        WHERE p.deleted = 0
+        <if test="q.examYear != null">
+            AND p.exam_year = #{q.examYear}
+        </if>
+        <if test="q.examTerm != null and q.examTerm != ''">
+            AND p.exam_term = #{q.examTerm}
+        </if>
+        <if test="q.status != null and q.status != ''">
+            AND p.status = #{q.status}
+        </if>
+        <if test="q.majorId != null">
+            AND p.major_id = #{q.majorId}
+        </if>
+        <if test="q.keyword != null and q.keyword != ''">
+            AND (p.plan_code LIKE '%' || #{q.keyword} || '%' OR p.plan_name LIKE '%' || #{q.keyword} || '%')
+        </if>
+        ORDER BY p.id DESC
+    </select>
+
+    <select id="listPublished" resultType="com.exam.module.plan.entity.ExamPlan">
+        SELECT p.*, c.course_name AS courseName, m.major_name AS majorName
+        FROM sys_exam_plan p
+        LEFT JOIN sys_course c ON c.id = p.course_id
+        LEFT JOIN sys_major  m ON m.id = p.major_id
+        WHERE p.deleted = 0 AND p.status = 'PUBLISHED'
+        <if test="q.examYear != null">
+            AND p.exam_year = #{q.examYear}
+        </if>
+        <if test="q.examTerm != null and q.examTerm != ''">
+            AND p.exam_term = #{q.examTerm}
+        </if>
+        <if test="q.majorId != null">
+            AND (p.major_id IS NULL OR p.major_id = #{q.majorId})
+        </if>
+        <if test="q.keyword != null and q.keyword != ''">
+            AND (p.plan_name LIKE '%' || #{q.keyword} || '%' OR c.course_name LIKE '%' || #{q.keyword} || '%')
+        </if>
+        ORDER BY p.exam_date ASC
+    </select>
+</mapper>

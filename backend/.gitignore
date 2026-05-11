@@ -1,0 +1,49 @@
+# Compiled class files
+target/
+*.class
+
+# Logs
+*.log
+logs/
+
+# Maven
+.mvn/
+mvnw
+mvnw.cmd
+!.mvn/wrapper/maven-wrapper.jar
+!.mvn/wrapper/maven-wrapper.properties
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.project
+.classpath
+.settings/
+.factorypath
+
+# Spring Boot
+HELP.md
+.gradle/
+build/
+out/
+bin/
+
+# SQLite database (生成的运行时数据)
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+exam.db
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temp
+*.tmp
+*.bak
+*.swp
+*~

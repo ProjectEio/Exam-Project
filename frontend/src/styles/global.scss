@@ -1,0 +1,40 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
+  background-color: #f5f7fa;
+  color: #1f2937;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: inherit; text-decoration: none; }
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(30, 64, 175, .25);
+  border-radius: 4px;
+  &:hover { background: rgba(30, 64, 175, .45); }
+}
+::-webkit-scrollbar-track { background: transparent; }
+
+.text-primary { color: #1e40af; }
+.bg-primary { background-color: #1e40af; }
+.bg-primary-gradient {
+  background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
+}
+.card-shadow { box-shadow: 0 6px 24px -8px rgba(30, 64, 175, .15); }

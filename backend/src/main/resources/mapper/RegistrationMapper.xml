@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.exam.module.registration.mapper.RegistrationMapper">
+
+    <select id="pageWithJoin" resultType="com.exam.module.registration.entity.Registration">
+        SELECT r.*, u.real_name AS studentName, u.id_card AS studentIdCard,
+               p.plan_name AS planName, p.plan_code AS planCode,
+               c.course_name AS courseName,
+               p.exam_date AS examDate, p.location AS examLocation,
+               p.start_time AS startTime, p.end_time AS endTime
+        FROM sys_registration r
+        LEFT JOIN sys_user u ON u.id = r.student_id
+        LEFT JOIN sys_exam_plan p ON p.id = r.plan_id
+        LEFT JOIN sys_course c ON c.id = p.course_id
+        WHERE r.deleted = 0
+        <if test="q.studentId != null">AND r.student_id = #{q.studentId}</if>
+        <if test="q.planId != null">AND r.plan_id = #{q.planId}</if>
+        <if test="q.status != null and q.status != ''">AND r.status = #{q.status}</if>
+        <if test="q.paymentStatus != null and q.paymentStatus != ''">AND r.payment_status = #{q.paymentStatus}</if>
+        <if test="q.keyword != null and q.keyword != ''">
+            AND (u.real_name LIKE '%' || #{q.keyword} || '%'
+                 OR p.plan_name LIKE '%' || #{q.keyword} || '%'
+                 OR r.registration_no LIKE '%' || #{q.keyword} || '%')
+        </if>
+        ORDER BY r.id DESC
+    </select>
+
+    <select id="listByStudent" resultType="com.exam.module.registration.entity.Registration">
+        SELECT r.*, u.real_name AS studentName, u.id_card AS studentIdCard,
+               p.plan_name AS planName, p.plan_code AS planCode,
+               c.course_name AS courseName,
+               p.exam_date AS examDate, p.location AS examLocation,
+               p.start_time AS startTime, p.end_time AS endTime
+        FROM sys_registration r
+        LEFT JOIN sys_user u ON u.id = r.student_id
+        LEFT JOIN sys_exam_plan p ON p.id = r.plan_id
+        LEFT JOIN sys_course c ON c.id = p.course_id
+        WHERE r.deleted = 0 AND r.student_id = #{studentId}
+        ORDER BY r.id DESC
+    </select>
+</mapper>

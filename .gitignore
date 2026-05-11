@@ -1,0 +1,15 @@
+# 项目级 gitignore（子目录 backend/frontend 还有更精细的）
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 临时
+*.tmp
+*.bak
+*.swp
