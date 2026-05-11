@@ -81,21 +81,39 @@ export default function AdminLayout() {
 
   return (
     <Layout className={styles.layout}>
-      <Sider width={240} className={styles.sider}>
-        <div className={styles.logo}>
-          <div className={styles.logoIcon}>
-            <CrownOutlined />
+      <Sider width={272} className={styles.sider}>
+        <div className={styles.siderInner}>
+          <div className={styles.logo}>
+            <div className={styles.logoIcon}>
+              <CrownOutlined />
+            </div>
+            <div>
+              <div className={styles.logoEyebrow}>Admin Console</div>
+              <div className={styles.logoText}>考试院管理后台</div>
+            </div>
           </div>
-          <div className={styles.logoText}>考试院管理后台</div>
+
+          <div className={styles.sidebarMeta}>
+            <div className={styles.sidebarMetaLabel}>当前身份</div>
+            <div className={styles.sidebarMetaValue}>
+              {user?.role ? roleLabel[user.role] : '管理用户'}
+            </div>
+          </div>
+
+          <Menu
+            mode="inline"
+            theme="light"
+            selectedKeys={[selectedKey]}
+            items={menuItems}
+            onClick={({ key }) => navigate(key)}
+            className={styles.menu}
+          />
+
+          <div className={styles.sidebarFooter}>
+            <div className={styles.sidebarFooterLabel}>导航模式</div>
+            <div className={styles.sidebarFooterValue}>轻量卡片式侧栏</div>
+          </div>
         </div>
-        <Menu
-          mode="inline"
-          theme="dark"
-          selectedKeys={[selectedKey]}
-          items={menuItems}
-          onClick={({ key }) => navigate(key)}
-          style={{ paddingTop: 12 }}
-        />
       </Sider>
 
       <Layout>
