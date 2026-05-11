@@ -5,8 +5,12 @@ import {
   Card,
   Empty,
   Input,
+  Row,
+  Col,
   Progress,
   Select,
+  Statistic,
+  Typography,
   Spin,
   Tag,
 } from 'antd'
@@ -73,6 +77,11 @@ export default function StudentPlanList() {
     })
   }, [plans, year, term, keyword])
 
+  const availableCount = useMemo(
+    () => filtered.filter((item) => (item.capacity || 0) > (item.registeredCount || 0)).length,
+    [filtered]
+  )
+
   const handleReg = (p: ExamPlan) => {
     if (!p.id) return
     modal.confirm({
@@ -104,8 +113,27 @@ export default function StudentPlanList() {
 
   return (
     <div className="space-y-4">
-      {/* 顶部筛选 */}
-      <Card className="rounded-2xl shadow-soft">
+      <Card bordered={false} className="rounded-2xl shadow-soft">
+        <Row gutter={[24, 24]} align="middle">
+          <Col xs={24} lg={14}>
+            <Typography.Title level={3} style={{ margin: 0 }}>
+              可报名考试计划
+            </Typography.Title>
+            <Typography.Paragraph style={{ margin: '8px 0 0', color: '#64748b' }}>
+              先筛选，再查看计划详情和名额占用情况。符合条件的计划可以直接提交报名。
+            </Typography.Paragraph>
+          </Col>
+          <Col xs={24} lg={10}>
+            <Row gutter={[16, 16]}>
+              <Col span={8}><Statistic title="已发布" value={plans.length} /></Col>
+              <Col span={8}><Statistic title="当前展示" value={filtered.length} /></Col>
+              <Col span={8}><Statistic title="仍可报名" value={availableCount} /></Col>
+            </Row>
+          </Col>
+        </Row>
+      </Card>
+
+      <Card bordered={false} className="rounded-2xl shadow-soft">
         <div className="flex flex-wrap items-center gap-3">
           <span className="font-semibold text-gray-700">筛选：</span>
           <Select
@@ -148,7 +176,7 @@ export default function StudentPlanList() {
       {/* 卡片网格 */}
       <Spin spinning={loading}>
         {filtered.length === 0 ? (
-          <Card className="rounded-2xl shadow-soft">
+          <Card bordered={false} className="rounded-2xl shadow-soft">
             <Empty description="未找到符合条件的考试计划" />
           </Card>
         ) : (
@@ -163,6 +191,7 @@ export default function StudentPlanList() {
               return (
                 <Card
                   key={p.id}
+                  bordered={false}
                   className="rounded-2xl shadow-soft transition-all duration-200 hover:-translate-y-1 hover:shadow-lg"
                   styles={{ body: { padding: 20 } }}
                 >
@@ -201,7 +230,7 @@ export default function StudentPlanList() {
                     <Progress
                       percent={percent}
                       size="small"
-                      strokeColor={full ? '#f5222d' : '#1e40af'}
+                      strokeColor={full ? '#ff4d4f' : '#1677ff'}
                       showInfo={false}
                     />
                     <div className="text-xs text-gray-400">
@@ -215,9 +244,6 @@ export default function StudentPlanList() {
                     disabled={registered || full}
                     loading={regging === p.id}
                     onClick={() => handleReg(p)}
-                    style={{
-                      background: registered || full ? undefined : '#1e40af',
-                    }}
                   >
                     {registered ? '已报名' : full ? '已满员' : '立即报名'}
                   </Button>

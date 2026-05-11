@@ -4,11 +4,17 @@ import {
   Avatar,
   Button,
   Card,
+  Col,
+  Descriptions,
   Form,
   Input,
+  Progress,
   Radio,
+  Row,
   Skeleton,
+  Space,
   Tag,
+  Typography,
 } from 'antd'
 import { SaveOutlined, UserOutlined } from '@ant-design/icons'
 import { getInfo } from '@/api/auth'
@@ -44,6 +50,16 @@ export default function Profile() {
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
 
+  const completion = user
+    ? Math.round(([
+        user.realName,
+        user.gender,
+        user.idCard,
+        user.phone,
+        user.email,
+      ].filter(Boolean).length / 5) * 100)
+    : 0
+
   const load = async () => {
     setLoading(true)
     try {
@@ -69,10 +85,9 @@ export default function Profile() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const onSave = async () => {
+  const onSave = async (values: FormValues) => {
     if (!user) return
     try {
-      const values = await form.validateFields()
       setSaving(true)
       const payload: User = {
         ...user,
@@ -99,45 +114,62 @@ export default function Profile() {
   }
 
   return (
-    <div className="space-y-4 max-w-3xl mx-auto">
-      {/* 头像 + 基本信息 */}
-      <Card className="rounded-2xl shadow-soft">
+    <div className="space-y-4 max-w-4xl mx-auto">
+      <Card bordered={false} className="rounded-2xl shadow-soft">
         {loading || !user ? (
           <Skeleton avatar paragraph={{ rows: 2 }} active />
         ) : (
-          <div className="flex items-center gap-5">
-            <Avatar
-              size={84}
-              style={{
-                background:
-                  'linear-gradient(135deg, #1e40af 0%, #3b82f6 100%)',
-                fontSize: 36,
-              }}
-              icon={<UserOutlined />}
-            >
-              {user.realName?.charAt(0) || user.username.charAt(0).toUpperCase()}
-            </Avatar>
-            <div>
-              <div className="text-2xl font-bold text-gray-800">
-                {user.realName || user.username}
-              </div>
-              <div className="text-sm text-gray-500 mt-1">
-                账号：<span className="font-mono">{user.username}</span>
-              </div>
-              <div className="mt-2">
-                <Tag color={ROLE_COLOR[user.role]} className="!px-3 !py-0.5">
-                  {ROLE_TEXT[user.role]}
-                </Tag>
-              </div>
-            </div>
-          </div>
+          <Row gutter={[24, 24]} align="middle">
+            <Col xs={24} lg={14}>
+              <Space size={18} align="start">
+                <Avatar
+                  size={88}
+                  style={{ background: '#e8f1ff', color: '#1677ff', fontSize: 34 }}
+                  icon={<UserOutlined />}
+                >
+                  {user.realName?.charAt(0) || user.username.charAt(0).toUpperCase()}
+                </Avatar>
+                <div>
+                  <Typography.Title level={3} style={{ margin: 0 }}>
+                    {user.realName || user.username}
+                  </Typography.Title>
+                  <Typography.Paragraph style={{ margin: '8px 0 12px', color: '#64748b' }}>
+                    这里集中维护你的身份、联系方式和报名所需的个人资料信息。
+                  </Typography.Paragraph>
+                  <Space wrap>
+                    <Tag color={ROLE_COLOR[user.role]}>{ROLE_TEXT[user.role]}</Tag>
+                    <Tag>{user.username}</Tag>
+                  </Space>
+                </div>
+              </Space>
+            </Col>
+            <Col xs={24} lg={10}>
+              <Descriptions
+                column={1}
+                size="small"
+                items={[
+                  { label: '资料完整度', children: <Progress percent={completion} size="small" /> },
+                  { label: '手机号', children: user.phone || '未填写' },
+                  { label: '邮箱', children: user.email || '未填写' },
+                ]}
+              />
+            </Col>
+          </Row>
         )}
       </Card>
 
-      {/* 表单 */}
       <Card
+        bordered={false}
         className="rounded-2xl shadow-soft"
         title={<span className="font-semibold text-gray-800">编辑个人资料</span>}
+        extra={
+          <Space>
+            <Button onClick={load} disabled={saving}>重置</Button>
+            <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => form.submit()}>
+              保存修改
+            </Button>
+          </Space>
+        }
       >
         {loading || !user ? (
           <Skeleton active paragraph={{ rows: 6 }} />
@@ -146,79 +178,75 @@ export default function Profile() {
             form={form}
             layout="vertical"
             requiredMark
-            className="max-w-xl"
+            className="max-w-3xl"
+            onFinish={onSave}
           >
-            <Form.Item label="用户名">
-              <Input value={user.username} disabled />
-            </Form.Item>
-
-            <Form.Item label="角色">
-              <Input value={ROLE_TEXT[user.role]} disabled />
-            </Form.Item>
-
-            <Form.Item
-              name="realName"
-              label="真实姓名"
-              rules={[{ required: true, message: '请输入真实姓名' }]}
-            >
-              <Input placeholder="请输入真实姓名" />
-            </Form.Item>
-
-            <Form.Item name="gender" label="性别">
-              <Radio.Group>
-                <Radio value="男">男</Radio>
-                <Radio value="女">女</Radio>
-              </Radio.Group>
-            </Form.Item>
-
-            <Form.Item
-              name="idCard"
-              label="身份证号"
-              rules={[
-                {
-                  pattern: /^[1-9]\d{5}(18|19|20)\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])\d{3}[\dXx]$/,
-                  message: '身份证号格式不正确',
-                },
-              ]}
-            >
-              <Input placeholder="请输入 18 位身份证号" maxLength={18} />
-            </Form.Item>
-
-            <Form.Item
-              name="phone"
-              label="手机号"
-              rules={[
-                {
-                  pattern: /^1[3-9]\d{9}$/,
-                  message: '手机号格式不正确',
-                },
-              ]}
-            >
-              <Input placeholder="请输入手机号" maxLength={11} />
-            </Form.Item>
-
-            <Form.Item
-              name="email"
-              label="邮箱"
-              rules={[{ type: 'email', message: '邮箱格式不正确' }]}
-            >
-              <Input placeholder="请输入邮箱" />
-            </Form.Item>
-
-            <Form.Item>
-              <Button
-                type="primary"
-                icon={<SaveOutlined />}
-                loading={saving}
-                onClick={onSave}
-                style={{ background: '#1e40af' }}
-              >
-                保存修改
-              </Button>
-              <Button className="ml-2" onClick={load} disabled={saving}>
-                重置
-              </Button>
-            </Form.Item>
+            <Row gutter={[16, 0]}>
+              <Col xs={24} md={12}>
+                <Form.Item label="用户名">
+                  <Input value={user.username} disabled />
+                </Form.Item>
+              </Col>
+              <Col xs={24} md={12}>
+                <Form.Item label="角色">
+                  <Input value={ROLE_TEXT[user.role]} disabled />
+                </Form.Item>
+              </Col>
+              <Col xs={24} md={12}>
+                <Form.Item
+                  name="realName"
+                  label="真实姓名"
+                  rules={[{ required: true, message: '请输入真实姓名' }]}
+                >
+                  <Input placeholder="请输入真实姓名" />
+                </Form.Item>
+              </Col>
+              <Col xs={24} md={12}>
+                <Form.Item name="gender" label="性别">
+                  <Radio.Group>
+                    <Radio value="男">男</Radio>
+                    <Radio value="女">女</Radio>
+                  </Radio.Group>
+                </Form.Item>
+              </Col>
+              <Col xs={24} md={12}>
+                <Form.Item
+                  name="idCard"
+                  label="身份证号"
+                  rules={[
+                    {
+                      pattern: /^[1-9]\d{5}(18|19|20)\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])\d{3}[\dXx]$/,
+                      message: '身份证号格式不正确',
+                    },
+                  ]}
+                >
+                  <Input placeholder="请输入 18 位身份证号" maxLength={18} />
+                </Form.Item>
+              </Col>
+              <Col xs={24} md={12}>
+                <Form.Item
+                  name="phone"
+                  label="手机号"
+                  rules={[
+                    {
+                      pattern: /^1[3-9]\d{9}$/,
+                      message: '手机号格式不正确',
+                    },
+                  ]}
+                >
+                  <Input placeholder="请输入手机号" maxLength={11} />
+                </Form.Item>
+              </Col>
+              <Col xs={24}>
+                <Form.Item
+                  name="email"
+                  label="邮箱"
+                  rules={[{ type: 'email', message: '邮箱格式不正确' }]}
+                >
+                  <Input placeholder="请输入邮箱" />
+                </Form.Item>
+              </Col>
+            </Row>
           </Form>
         )}
       </Card>

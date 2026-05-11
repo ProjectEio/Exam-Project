@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { Spin } from 'antd'
+import { useEffect, useMemo, useState } from 'react'
+import { Avatar, Card, Col, Empty, Row, Space, Spin, Statistic, Tag, Typography } from 'antd'
 import ReactECharts from 'echarts-for-react'
 import {
   UserOutlined,
@@ -42,6 +42,48 @@ export default function Dashboard() {
     day: 'numeric',
     weekday: 'long',
   })
+
+  const summaryItems = useMemo(
+    () => [
+      {
+        key: 'users',
+        label: '用户总数',
+        value: stats?.userCount ?? 0,
+        hint: '当前平台账号',
+        icon: <UserOutlined />,
+        className: s.blue,
+        suffix: '人',
+      },
+      {
+        key: 'plans',
+        label: '考试计划数',
+        value: stats?.planCount ?? 0,
+        hint: '已建立计划',
+        icon: <ScheduleOutlined />,
+        className: s.green,
+        suffix: '项',
+      },
+      {
+        key: 'registrations',
+        label: '报名总数',
+        value: stats?.registrationCount ?? 0,
+        hint: '累计提交记录',
+        icon: <FileTextOutlined />,
+        className: s.orange,
+        suffix: '条',
+      },
+      {
+        key: 'pass',
+        label: '总合格率',
+        value: Number((stats?.passRate ?? 0).toFixed(1)),
+        hint: '所有成绩统计',
+        icon: <TrophyOutlined />,
+        className: s.purple,
+        suffix: '%',
+      },
+    ],
+    [stats]
+  )
 
   const trendOption = {
     tooltip: { trigger: 'axis' },
@@ -97,51 +139,60 @@ export default function Dashboard() {
   }
 
   return (
-    <div>
-      <div className="mb-4">
-        <h2 className="text-xl font-semibold m-0">
-          你好，{user?.realName || user?.username}！
-        </h2>
-        <p className="text-gray-500 mt-1 mb-0">今天是 {today}</p>
-      </div>
+    <div className={s.page}>
+      <Card bordered={false} className={s.heroCard}>
+        <Row gutter={[24, 24]} align="middle" justify="space-between">
+          <Col xs={24} lg={16}>
+            <Space direction="vertical" size={8}>
+              <Tag color="blue" className={s.heroTag}>管理工作台</Tag>
+              <Typography.Title level={2} className={s.heroTitle}>
+                你好，{user?.realName || user?.username}
+              </Typography.Title>
+              <Typography.Paragraph className={s.heroDesc}>
+                这里集中查看报名趋势、课程通过率和专业分布。界面已统一为更轻量的白色卡片风格，便于日常巡检和管理操作。
+              </Typography.Paragraph>
+            </Space>
+          </Col>
+          <Col xs={24} lg={8}>
+            <div className={s.heroMeta}>
+              <div className={s.heroMetaLabel}>当前日期</div>
+              <div className={s.heroMetaValue}>{today}</div>
+            </div>
+          </Col>
+        </Row>
+      </Card>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-        <div className={`${s.statCard} ${s.blue}`}>
-          <div className={s.label}>用户总数</div>
-          <div className={s.value}>{stats?.userCount ?? 0}</div>
-          <UserOutlined className={s.icon} />
-        </div>
-        <div className={`${s.statCard} ${s.green}`}>
-          <div className={s.label}>考试计划数</div>
-          <div className={s.value}>{stats?.planCount ?? 0}</div>
-          <ScheduleOutlined className={s.icon} />
-        </div>
-        <div className={`${s.statCard} ${s.orange}`}>
-          <div className={s.label}>报名总数</div>
-          <div className={s.value}>{stats?.registrationCount ?? 0}</div>
-          <FileTextOutlined className={s.icon} />
-        </div>
-        <div className={`${s.statCard} ${s.purple}`}>
-          <div className={s.label}>总合格率</div>
-          <div className={s.value}>{(stats?.passRate ?? 0).toFixed(1)}%</div>
-          <TrophyOutlined className={s.icon} />
-        </div>
-      </div>
+      <Row gutter={[16, 16]}>
+        {summaryItems.map((item) => (
+          <Col xs={24} sm={12} xl={6} key={item.key}>
+            <Card bordered={false} className={`${s.statCard} ${item.className}`}>
+              <div className={s.statHeader}>
+                <Avatar size={46} className={s.statAvatar} icon={item.icon} />
+                <Tag className={s.statHint}>{item.hint}</Tag>
+              </div>
+              <Statistic title={item.label} value={item.value} suffix={item.suffix} />
+            </Card>
+          </Col>
+        ))}
+      </Row>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="md:col-span-2 bg-white rounded-lg shadow-soft p-4">
-          <h3 className="text-base font-semibold m-0 mb-2">报名趋势</h3>
-          <ReactECharts option={trendOption} style={{ height: 280 }} />
-        </div>
-        <div className="bg-white rounded-lg shadow-soft p-4">
-          <h3 className="text-base font-semibold m-0 mb-2">课程合格率 Top10</h3>
-          <ReactECharts option={passOption} style={{ height: 320 }} />
-        </div>
-        <div className="bg-white rounded-lg shadow-soft p-4">
-          <h3 className="text-base font-semibold m-0 mb-2">专业-计划数分布</h3>
-          <ReactECharts option={distOption} style={{ height: 320 }} />
-        </div>
-      </div>
+      <Row gutter={[16, 16]}>
+        <Col xs={24} xl={24}>
+          <Card bordered={false} title="报名趋势" className={s.chartCard}>
+            {trend.length ? <ReactECharts option={trendOption} style={{ height: 300 }} /> : <Empty description="暂无趋势数据" />}
+          </Card>
+        </Col>
+        <Col xs={24} xl={12}>
+          <Card bordered={false} title="课程合格率 Top10" className={s.chartCard}>
+            {passTop.length ? <ReactECharts option={passOption} style={{ height: 320 }} /> : <Empty description="暂无成绩数据" />}
+          </Card>
+        </Col>
+        <Col xs={24} xl={12}>
+          <Card bordered={false} title="专业计划分布" className={s.chartCard}>
+            {dist.length ? <ReactECharts option={distOption} style={{ height: 320 }} /> : <Empty description="暂无分布数据" />}
+          </Card>
+        </Col>
+      </Row>
     </div>
   )
 }

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import {
   Table, Button, Input, Space, Tag, Modal, Form, Popconfirm, App,
   InputNumber, Select, DatePicker, TimePicker, Progress,
+  Card, Row, Col, Typography,
 } from 'antd'
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
@@ -133,7 +134,18 @@ export default function PlanList() {
 
   return (
     <div>
-      <div className="bg-white p-4 rounded-lg shadow-soft mb-4 flex flex-wrap gap-3 items-center">
+      <Card bordered={false} className="mb-4 rounded-2xl shadow-soft">
+        <Row gutter={[24, 24]} align="middle" justify="space-between">
+          <Col xs={24} xl={14}>
+            <Typography.Title level={3} style={{ margin: 0 }}>
+              考试计划管理
+            </Typography.Title>
+            <Typography.Paragraph style={{ margin: '8px 0 0', color: '#64748b' }}>
+              管理计划创建、发布、容量和考试安排。筛选区与表格区已统一为更轻量的白色信息面板。
+            </Typography.Paragraph>
+          </Col>
+          <Col xs={24} xl={10}>
+            <div className="flex flex-wrap gap-3 items-center justify-end">
         <Select placeholder="年份" allowClear style={{ width: 110 }} value={query.examYear}
           onChange={(v) => setQuery({ ...query, examYear: v, current: 1 })}
           options={[{ value: 2024 }, { value: 2025 }, { value: 2026 }]} />
@@ -150,16 +162,19 @@ export default function PlanList() {
         <Input.Search placeholder="搜索代码/名称" allowClear style={{ width: 220 }}
           onSearch={(v) => setQuery({ ...query, keyword: v, current: 1 })} />
         <Button type="primary" icon={<PlusOutlined />} onClick={onAdd}>新增计划</Button>
-      </div>
+            </div>
+          </Col>
+        </Row>
+      </Card>
 
-      <div className="bg-white rounded-lg shadow-soft p-4">
+      <Card bordered={false} className="rounded-2xl shadow-soft">
         <Table rowKey="id" dataSource={data} columns={columns as any} loading={loading}
           scroll={{ x: 1700 }}
           pagination={{
             current: query.current, pageSize: query.size, total, showSizeChanger: true,
             onChange: (page, size) => setQuery({ ...query, current: page, size }),
           }} />
-      </div>
+      </Card>
 
       <Modal title={editing ? '编辑考试计划' : '新增考试计划'} open={open} width={720}
         onCancel={() => setOpen(false)} onOk={onSave} destroyOnClose>
