@@ -5,7 +5,7 @@ import {
 import {
   ExportOutlined, CheckOutlined, CloseOutlined, DownloadOutlined,
 } from '@ant-design/icons'
-import { pageReg, auditReg, cancelReg, ticketUrl } from '@/api/registration'
+import { pageReg, auditReg, cancelReg, ticketFile } from '@/api/registration'
 import useAuthStore from '@/store/auth'
 import type { Registration } from '@/types'
 
@@ -85,14 +85,18 @@ export default function RegistrationList() {
       .catch(() => message.error('导出失败'))
   }
   const onTicket = (id: number) => {
-    fetch(ticketUrl(id), { headers: token ? { Authorization: `Bearer ${token}` } : {} })
-      .then((r) => {
-        if (!r.ok) throw new Error('下载失败')
-        return r.blob()
-      })
-      .then((blob) => {
+    ticketFile(id)
+      .then((resp) => {
+        const blob = resp.data as Blob
         const url = URL.createObjectURL(blob)
-        window.open(url)
+        const link = document.createElement('a')
+        link.href = url
+        link.target = '_blank'
+        link.rel = 'noopener noreferrer'
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+        window.setTimeout(() => URL.revokeObjectURL(url), 1000)
       })
       .catch(() => message.error('准考证下载失败'))
   }

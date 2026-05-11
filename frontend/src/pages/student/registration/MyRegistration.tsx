@@ -16,7 +16,7 @@ import {
   ReloadOutlined,
   CloseCircleOutlined,
 } from '@ant-design/icons'
-import { cancelReg, myReg, ticketUrl } from '@/api/registration'
+import { cancelReg, myReg, ticketFile } from '@/api/registration'
 import type { Registration } from '@/types'
 
 const STATUS_COLOR: Record<Registration['status'], string> = {
@@ -51,8 +51,22 @@ export default function MyRegistration() {
     load()
   }, [])
 
-  const handleDownload = (id: number) => {
-    window.open(ticketUrl(id))
+  const handleDownload = async (id: number) => {
+    try {
+      const resp = await ticketFile(id)
+      const blob = resp.data as Blob
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.target = '_blank'
+      link.rel = 'noopener noreferrer'
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+    } catch {
+      message.error('准考证下载失败')
+    }
   }
 
   const handleCancel = async (id: number) => {

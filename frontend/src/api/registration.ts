@@ -8,4 +8,5 @@ export const doReg     = (planId: number) => request.post<any, ApiResp<Registrat
 export const auditReg  = (id: number, status: string, remark?: string) =>
   request.put<any, ApiResp<void>>(`/registrations/${id}/audit`, null, { params: { status, remark } })
 export const cancelReg = (id: number) => request.delete<any, ApiResp<void>>(`/registrations/${id}`)
-export const ticketUrl = (id: number) => `/api/registrations/${id}/ticket`
+export const ticketFile = (id: number) =>
+  request.get<any, any>(`/registrations/${id}/ticket`, { responseType: 'blob' })
