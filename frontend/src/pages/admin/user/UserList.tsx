@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import {
-  Table, Button, Input, Select, Space, Tag, Modal, Form, Popconfirm, App,
+  Table, Button, Input, Select, Space, Tag, Modal, Form, Popconfirm, App, Card,
 } from 'antd'
 import {
   PlusOutlined, KeyOutlined, EditOutlined, DeleteOutlined,
@@ -27,6 +27,7 @@ export default function UserList() {
   const [pwdOpen, setPwdOpen] = useState(false)
   const [pwdTarget, setPwdTarget] = useState<User | null>(null)
   const [pwdForm] = Form.useForm()
+  const initialLoading = loading && data.length === 0
 
   const load = async () => {
     setLoading(true)
@@ -84,7 +85,8 @@ export default function UserList() {
 
   return (
     <div>
-      <div className="bg-white p-4 rounded-lg shadow-soft mb-4 flex flex-wrap gap-3 items-center">
+      <Card bordered={false} className="rounded-2xl shadow-soft mb-4" loading={initialLoading}>
+        <div className="flex flex-wrap gap-3 items-center">
         <Input.Search
           placeholder="搜索用户名/姓名"
           allowClear
@@ -104,14 +106,15 @@ export default function UserList() {
           ]}
         />
         <Button type="primary" icon={<PlusOutlined />} onClick={onAdd}>新增用户</Button>
-      </div>
+        </div>
+      </Card>
 
-      <div className="bg-white rounded-lg shadow-soft p-4">
+      <Card bordered={false} className="rounded-2xl shadow-soft" loading={initialLoading}>
         <Table
           rowKey="id"
           dataSource={data}
           columns={columns as any}
-          loading={loading}
+          loading={!initialLoading && loading}
           pagination={{
             current: query.current,
             pageSize: query.size,
@@ -120,7 +123,7 @@ export default function UserList() {
             onChange: (page, size) => setQuery({ ...query, current: page, size }),
           }}
         />
-      </div>
+      </Card>
 
       <Modal
         title={editing ? '编辑用户' : '新增用户'}

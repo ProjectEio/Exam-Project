@@ -11,7 +11,6 @@ import {
   Select,
   Statistic,
   Typography,
-  Spin,
   Tag,
 } from 'antd'
 import {
@@ -81,6 +80,7 @@ export default function StudentPlanList() {
     () => filtered.filter((item) => (item.capacity || 0) > (item.registeredCount || 0)).length,
     [filtered]
   )
+  const initialLoading = loading && plans.length === 0 && regs.length === 0
 
   const handleReg = (p: ExamPlan) => {
     if (!p.id) return
@@ -113,7 +113,7 @@ export default function StudentPlanList() {
 
   return (
     <div className="space-y-4">
-      <Card bordered={false} className="rounded-2xl shadow-soft">
+      <Card bordered={false} className="rounded-2xl shadow-soft" loading={initialLoading}>
         <Row gutter={[24, 24]} align="middle">
           <Col xs={24} lg={14}>
             <Typography.Title level={3} style={{ margin: 0 }}>
@@ -133,7 +133,7 @@ export default function StudentPlanList() {
         </Row>
       </Card>
 
-      <Card bordered={false} className="rounded-2xl shadow-soft">
+      <Card bordered={false} className="rounded-2xl shadow-soft" loading={initialLoading}>
         <div className="flex flex-wrap items-center gap-3">
           <span className="font-semibold text-gray-700">筛选：</span>
           <Select
@@ -174,8 +174,13 @@ export default function StudentPlanList() {
       </Card>
 
       {/* 卡片网格 */}
-      <Spin spinning={loading}>
-        {filtered.length === 0 ? (
+      {initialLoading ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {Array.from({ length: 6 }).map((_, idx) => (
+            <Card key={idx} bordered={false} loading className="rounded-2xl shadow-soft" />
+          ))}
+        </div>
+      ) : filtered.length === 0 ? (
           <Card bordered={false} className="rounded-2xl shadow-soft">
             <Empty description="未找到符合条件的考试计划" />
           </Card>
@@ -252,7 +257,6 @@ export default function StudentPlanList() {
             })}
           </div>
         )}
-      </Spin>
     </div>
   )
 }

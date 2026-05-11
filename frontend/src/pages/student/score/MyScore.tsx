@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { App, Card, Collapse, Empty, Spin, Statistic, Table, Tag } from 'antd'
+import { App, Card, Collapse, Empty, Statistic, Table, Tag } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import {
   BookOutlined,
@@ -46,6 +46,8 @@ export default function MyScore() {
     }
     load()
   }, [message])
+
+  const initialLoading = loading && data.length === 0
 
   const stats = useMemo(() => {
     const total = data.length
@@ -138,7 +140,7 @@ export default function MyScore() {
     <div className="space-y-4">
       {/* 统计卡 */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Card className="rounded-2xl shadow-soft">
+        <Card className="rounded-2xl shadow-soft" loading={initialLoading}>
           <Statistic
             title={
               <span className="flex items-center gap-2 text-gray-600">
@@ -150,7 +152,7 @@ export default function MyScore() {
             suffix="门"
           />
         </Card>
-        <Card className="rounded-2xl shadow-soft">
+        <Card className="rounded-2xl shadow-soft" loading={initialLoading}>
           <Statistic
             title={
               <span className="flex items-center gap-2 text-gray-600">
@@ -162,7 +164,7 @@ export default function MyScore() {
             suffix={`/ ${stats.total} 门`}
           />
         </Card>
-        <Card className="rounded-2xl shadow-soft">
+        <Card className="rounded-2xl shadow-soft" loading={initialLoading}>
           <Statistic
             title={
               <span className="flex items-center gap-2 text-gray-600">
@@ -178,8 +180,9 @@ export default function MyScore() {
       </div>
 
       {/* 分组成绩 */}
-      <Spin spinning={loading}>
-        {groups.length === 0 ? (
+      {initialLoading ? (
+        <Card className="rounded-2xl shadow-soft" loading={initialLoading} />
+      ) : groups.length === 0 ? (
           <Card className="rounded-2xl shadow-soft">
             <Empty description="暂无成绩记录" />
           </Card>
@@ -211,7 +214,6 @@ export default function MyScore() {
             }))}
           />
         )}
-      </Spin>
     </div>
   )
 }
