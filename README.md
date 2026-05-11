@@ -1,8 +1,3 @@
-# 🎓 省考试院自学考试计划管理系统
-
-> 一套面向省考试院自学考试业务的 **全栈管理系统**，覆盖考试计划发布、考生报名、成绩录入、统计分析等核心场景。
-> 后端基于 **Spring Boot 3.2 + MyBatis-Plus + SQLite**，前端基于 **React 18 + Vite 5 + TypeScript 5 + Ant Design 5**。
-
 ![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.2-6DB33F?logo=springboot&logoColor=white)
 ![Java](https://img.shields.io/badge/JDK-17-007396?logo=openjdk&logoColor=white)
 ![MyBatis-Plus](https://img.shields.io/badge/MyBatis--Plus-3.5.7-red)
@@ -16,7 +11,7 @@
 
 ---
 
-## 📑 目录
+## 目录
 
 - [项目简介](#-项目简介)
 - [技术栈](#-技术栈)
@@ -88,7 +83,7 @@ shixunwork/
 
 ---
 
-## 🧩 功能模块
+## 功能模块
 
 系统共分为 **8 大业务模块**，其中 ⭐ 标记为核心模块：
 

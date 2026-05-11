@@ -11,8 +11,8 @@ export default function Forbidden() {
         title="403"
         subTitle="抱歉，您没有访问该页面的权限。"
         extra={
-          <Button type="primary" onClick={() => navigate('/login')}>
-            返回登录
+          <Button type="primary" onClick={() => navigate('/')}>
+            返回首页
           </Button>
         }
       />

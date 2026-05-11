@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { App, Card, Empty, List, Spin, Tag } from 'antd'
+import { App, Avatar, Button, Card, Col, Empty, List, Row, Space, Spin, Statistic, Tag, Typography } from 'antd'
 import {
   CalendarOutlined,
+  CheckCircleOutlined,
   FileTextOutlined,
   TrophyOutlined,
   UserOutlined,
-  RightOutlined,
   EnvironmentOutlined,
   ClockCircleOutlined,
 } from '@ant-design/icons'
@@ -46,6 +46,11 @@ export default function StudentHome() {
 
   const motto = useMemo(() => MOTTOS[Math.floor(Math.random() * MOTTOS.length)], [])
   const today = dayjs().format('YYYY 年 MM 月 DD 日 dddd')
+  const approvedCount = useMemo(
+    () => regs.filter((item) => item.status === 'APPROVED').length,
+    [regs]
+  )
+  const nextExamDate = useMemo(() => plans.find((item) => item.examDate)?.examDate || '待定', [plans])
 
   useEffect(() => {
     let cancelled = false
@@ -74,7 +79,7 @@ export default function StudentHome() {
       title: '考试计划',
       desc: '查看已发布的考试',
       icon: <CalendarOutlined />,
-      color: 'from-blue-500 to-blue-700',
+      avatarStyle: { background: '#e8f1ff', color: '#1677ff' },
       path: '/student/plans',
     },
     {
@@ -82,7 +87,7 @@ export default function StudentHome() {
       title: '我的报名',
       desc: '查看报名审核进度',
       icon: <FileTextOutlined />,
-      color: 'from-amber-400 to-orange-500',
+      avatarStyle: { background: '#fff7e6', color: '#fa8c16' },
       path: '/student/my-registrations',
     },
     {
@@ -90,7 +95,7 @@ export default function StudentHome() {
       title: '我的成绩',
       desc: '历次考试成绩查询',
       icon: <TrophyOutlined />,
-      color: 'from-emerald-400 to-emerald-600',
+      avatarStyle: { background: '#edfdf3', color: '#389e0d' },
       path: '/student/my-scores',
     },
     {
@@ -98,53 +103,81 @@ export default function StudentHome() {
       title: '个人中心',
       desc: '维护个人资料',
       icon: <UserOutlined />,
-      color: 'from-purple-400 to-purple-600',
+      avatarStyle: { background: '#f4f0ff', color: '#531dab' },
       path: '/student/profile',
     },
   ]
 
   return (
     <div className="space-y-6">
-      {/* 欢迎卡片 */}
-      <div
-        className="rounded-2xl shadow-soft p-8 text-white relative overflow-hidden"
-        style={{
-          background:
-            'linear-gradient(120deg, #1e40af 0%, #2563eb 50%, #3b82f6 100%)',
-        }}
+      <Card
+        bordered={false}
+        style={{ borderRadius: 24, boxShadow: '0 18px 40px rgba(15, 23, 42, 0.06)' }}
       >
-        <div className="absolute -right-8 -top-8 w-48 h-48 rounded-full bg-white/10" />
-        <div className="absolute right-20 -bottom-12 w-40 h-40 rounded-full bg-white/10" />
-        <div className="relative">
-          <div className="text-3xl font-bold mb-2">
-            你好，{user?.realName || user?.username || '同学'}！欢迎来到自学考试服务平台
-          </div>
-          <div className="text-white/90 text-base mb-1">{today}</div>
-          <div className="text-white/80 text-sm italic">{motto}</div>
-        </div>
-      </div>
+        <Row gutter={[24, 24]} align="middle">
+          <Col xs={24} lg={16}>
+            <Space direction="vertical" size={10}>
+              <Tag color="blue">考生首页</Tag>
+              <Typography.Title level={2} style={{ margin: 0 }}>
+                你好，{user?.realName || user?.username || '同学'}
+              </Typography.Title>
+              <Typography.Text type="secondary">{today}</Typography.Text>
+              <Typography.Paragraph style={{ marginBottom: 0, color: '#475569' }}>
+                {motto}
+              </Typography.Paragraph>
+            </Space>
+          </Col>
+          <Col xs={24} lg={8}>
+            <Row gutter={[16, 16]}>
+              <Col span={12}>
+                <Statistic title="已发布计划" value={plans.length} />
+              </Col>
+              <Col span={12}>
+                <Statistic title="我的报名" value={regs.length} />
+              </Col>
+              <Col span={12}>
+                <Statistic title="已通过" value={approvedCount} />
+              </Col>
+              <Col span={12}>
+                <Statistic title="最近考试日" value={nextExamDate} />
+              </Col>
+            </Row>
+          </Col>
+        </Row>
+      </Card>
 
-      {/* 快捷卡片 */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {shortcuts.map((s) => (
-          <div
-            key={s.key}
-            onClick={() => navigate(s.path)}
-            className={`cursor-pointer rounded-2xl shadow-soft p-5 bg-gradient-to-br ${s.color} text-white transition-all duration-200 hover:-translate-y-1 hover:shadow-lg`}
-          >
-            <div className="text-3xl mb-3 opacity-90">{s.icon}</div>
-            <div className="text-lg font-semibold">{s.title}</div>
-            <div className="text-white/80 text-xs mt-1">{s.desc}</div>
-          </div>
+      <Row gutter={[16, 16]}>
+        {shortcuts.map((item) => (
+          <Col xs={24} sm={12} xl={6} key={item.key}>
+            <Card
+              hoverable
+              bordered={false}
+              onClick={() => navigate(item.path)}
+              style={{ borderRadius: 20, height: '100%', boxShadow: '0 12px 30px rgba(15, 23, 42, 0.05)' }}
+            >
+              <Space direction="vertical" size={16} style={{ width: '100%' }}>
+                <Avatar size={52} style={item.avatarStyle} icon={item.icon} />
+                <div>
+                  <Typography.Title level={5} style={{ margin: '0 0 6px 0' }}>
+                    {item.title}
+                  </Typography.Title>
+                  <Typography.Text type="secondary">{item.desc}</Typography.Text>
+                </div>
+                <Button type="link" style={{ padding: 0 }}>
+                  进入
+                </Button>
+              </Space>
+            </Card>
+          </Col>
         ))}
-      </div>
+      </Row>
 
-      {/* 双栏 */}
       <Spin spinning={loading}>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* 最近发布的考试计划 */}
+        <Row gutter={[24, 24]}>
+          <Col xs={24} lg={12}>
           <Card
-            className="rounded-2xl shadow-soft"
+            bordered={false}
+            style={{ borderRadius: 20, height: '100%', boxShadow: '0 18px 40px rgba(15, 23, 42, 0.06)' }}
             title={
               <span className="flex items-center gap-2">
                 <CalendarOutlined className="text-primary" />
@@ -152,9 +185,9 @@ export default function StudentHome() {
               </span>
             }
             extra={
-              <a onClick={() => navigate('/student/plans')} className="text-primary">
-                查看全部 <RightOutlined />
-              </a>
+              <Button type="link" onClick={() => navigate('/student/plans')}>
+                查看全部
+              </Button>
             }
           >
             {plans.length === 0 ? (
@@ -163,35 +196,37 @@ export default function StudentHome() {
               <List
                 dataSource={plans}
                 renderItem={(p) => (
-                  <List.Item className="hover:bg-blue-50/40 rounded-lg px-2 transition">
-                    <div className="w-full">
-                      <div className="flex items-center justify-between">
-                        <span className="font-semibold text-gray-800">{p.planName}</span>
+                  <List.Item>
+                    <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                      <Space wrap size={[8, 8]}>
                         <Tag color="blue">
                           {p.examYear} {p.examTerm}
                         </Tag>
-                      </div>
-                      <div className="text-xs text-gray-500 mt-1 flex flex-wrap gap-3">
+                        {p.majorName && <Tag>{p.majorName}</Tag>}
+                      </Space>
+                      <Typography.Text strong>{p.planName}</Typography.Text>
+                      <Space wrap size="large" style={{ color: '#64748b' }}>
                         <span>
                           <CalendarOutlined /> {p.examDate || '—'}
                         </span>
                         <span>
-                          <ClockCircleOutlined /> {p.startTime || '—'}~{p.endTime || '—'}
+                          <ClockCircleOutlined /> {p.startTime || '—'} ~ {p.endTime || '—'}
                         </span>
                         <span>
                           <EnvironmentOutlined /> {p.location || '—'}
                         </span>
-                      </div>
-                    </div>
+                      </Space>
+                    </Space>
                   </List.Item>
                 )}
               />
             )}
           </Card>
-
-          {/* 我的最近报名 */}
+          </Col>
+          <Col xs={24} lg={12}>
           <Card
-            className="rounded-2xl shadow-soft"
+            bordered={false}
+            style={{ borderRadius: 20, height: '100%', boxShadow: '0 18px 40px rgba(15, 23, 42, 0.06)' }}
             title={
               <span className="flex items-center gap-2">
                 <FileTextOutlined className="text-accent" />
@@ -199,12 +234,9 @@ export default function StudentHome() {
               </span>
             }
             extra={
-              <a
-                onClick={() => navigate('/student/my-registrations')}
-                className="text-primary"
-              >
-                查看全部 <RightOutlined />
-              </a>
+              <Button type="link" onClick={() => navigate('/student/my-registrations')}>
+                查看全部
+              </Button>
             }
           >
             {regs.length === 0 ? (
@@ -213,15 +245,15 @@ export default function StudentHome() {
               <List
                 dataSource={regs}
                 renderItem={(r) => (
-                  <List.Item className="hover:bg-amber-50/40 rounded-lg px-2 transition">
+                  <List.Item>
                     <div className="w-full">
-                      <div className="flex items-center justify-between">
-                        <span className="font-semibold text-gray-800">
+                      <div className="flex items-center justify-between gap-3">
+                        <Typography.Text strong>
                           {r.planName || `报名 #${r.registrationNo}`}
-                        </span>
+                        </Typography.Text>
                         <Tag color={STATUS_COLOR[r.status]}>{STATUS_TEXT[r.status]}</Tag>
                       </div>
-                      <div className="text-xs text-gray-500 mt-1 flex flex-wrap gap-3">
+                      <div className="text-xs text-gray-500 mt-2 flex flex-wrap gap-3">
                         <span>课程：{r.courseName || '—'}</span>
                         <span>
                           <CalendarOutlined /> {r.examDate || '—'}
@@ -242,7 +274,8 @@ export default function StudentHome() {
               />
             )}
           </Card>
-        </div>
+          </Col>
+        </Row>
       </Spin>
     </div>
   )

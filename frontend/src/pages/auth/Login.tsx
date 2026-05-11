@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Form, Input, Button, App } from 'antd'
-import { BookOutlined, UserOutlined, LockOutlined } from '@ant-design/icons'
-import { Link, useNavigate } from 'react-router-dom'
+import { BookOutlined, HomeOutlined, LockOutlined, UserOutlined } from '@ant-design/icons'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { login } from '@/api/auth'
 import useAuthStore from '@/store/auth'
 import styles from './Login.module.scss'
@@ -14,6 +14,7 @@ interface LoginForm {
 export default function Login() {
   const { message } = App.useApp()
   const navigate = useNavigate()
+  const location = useLocation()
   const setAuth = useAuthStore((s) => s.setAuth)
   const [loading, setLoading] = useState(false)
 
@@ -24,11 +25,9 @@ export default function Login() {
       const { token, userId, username, realName, role } = res.data
       setAuth(token, { userId, username, realName, role })
       message.success('登录成功，欢迎回来！')
-      if (role === 'STUDENT') {
-        navigate('/student/home')
-      } else {
-        navigate('/admin/dashboard')
-      }
+      const from = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname
+      const fallbackPath = role === 'STUDENT' ? '/student/home' : '/admin/dashboard'
+      navigate(from && from !== '/login' ? from : fallbackPath, { replace: true })
     } catch {
       // 错误消息已由请求拦截器统一处理，这里仅捕获以阻止 unhandled rejection
     } finally {
@@ -98,6 +97,12 @@ export default function Login() {
           还没有账号？
           <Link to="/register" className="text-blue-600 font-medium hover:underline">
             考生注册
+          </Link>
+        </div>
+
+        <div className={styles.footerLinkSecondary}>
+          <Link to="/" className="text-blue-600 font-medium hover:underline">
+            <HomeOutlined /> 返回公开首页
           </Link>
         </div>
       </div>

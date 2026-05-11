@@ -40,7 +40,7 @@ export default function StudentLayout() {
   const handleLogout = () => {
     useAuthStore.getState().logout()
     message.success('已退出登录')
-    navigate('/login')
+    navigate('/')
   }
 
   const dropdownItems: MenuProps['items'] = [
@@ -71,7 +71,7 @@ export default function StudentLayout() {
 
         <Menu
           mode="horizontal"
-          theme="dark"
+          theme="light"
           selectedKeys={[selectedKey]}
           items={menuItems}
           onClick={({ key }) => navigate(key)}
@@ -82,7 +82,7 @@ export default function StudentLayout() {
           <div className={styles.userBlock}>
             <Avatar
               size={32}
-              style={{ background: 'linear-gradient(135deg, #f59e0b, #fbbf24)', color: '#1e293b' }}
+              style={{ background: '#e8f1ff', color: '#1677ff' }}
               icon={<UserOutlined />}
             />
             <span className={styles.userName}>{user?.realName || user?.username || '考生'}</span>

@@ -6,6 +6,7 @@ import RoleRoute from './RoleRoute'
 const Login = lazy(() => import('@/pages/auth/Login'))
 const Register = lazy(() => import('@/pages/auth/Register'))
 const Forbidden = lazy(() => import('@/pages/auth/Forbidden'))
+const PublicHome = lazy(() => import('@/pages/public/Home'))
 
 const AdminLayout = lazy(() => import('@/layouts/AdminLayout'))
 const StudentLayout = lazy(() => import('@/layouts/StudentLayout'))
@@ -35,6 +36,7 @@ export default function AppRouter() {
   return (
     <Suspense fallback={Loading}>
       <Routes>
+        <Route path="/" element={<PublicHome />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
         <Route path="/403" element={<Forbidden />} />
@@ -73,9 +75,7 @@ export default function AppRouter() {
           <Route path="my-scores" element={<StudentMyScore />} />
           <Route path="profile" element={<StudentProfile />} />
         </Route>
-
-        <Route path="/" element={<Navigate to="/login" replace />} />
-        <Route path="*" element={<Navigate to="/login" replace />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Suspense>
   )

@@ -60,7 +60,7 @@ export default function AdminLayout() {
   const handleLogout = () => {
     useAuthStore.getState().logout()
     message.success('已退出登录')
-    navigate('/login')
+    navigate('/')
   }
 
   const dropdownItems: MenuProps['items'] = [
@@ -105,7 +105,7 @@ export default function AdminLayout() {
             <div className={styles.userBlock}>
               <Avatar
                 size={36}
-                style={{ background: 'linear-gradient(135deg, #1e40af, #2563eb)' }}
+                style={{ background: '#e8f1ff', color: '#1677ff' }}
                 icon={<UserOutlined />}
               />
               <div className="flex flex-col leading-tight">

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Form, Input, Button, Select, App } from 'antd'
-import { BookOutlined } from '@ant-design/icons'
+import { BookOutlined, HomeOutlined } from '@ant-design/icons'
 import { Link, useNavigate } from 'react-router-dom'
 import { register } from '@/api/auth'
 import type { RegisterDTO } from '@/api/auth'
@@ -132,6 +132,12 @@ export default function Register() {
           已有账号？
           <Link to="/login" className="text-blue-600 font-medium hover:underline">
             返回登录
+          </Link>
+        </div>
+
+        <div className={styles.footerLinkSecondary}>
+          <Link to="/" className="text-blue-600 font-medium hover:underline">
+            <HomeOutlined /> 返回公开首页
           </Link>
         </div>
       </div>
