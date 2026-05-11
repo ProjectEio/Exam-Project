@@ -3,20 +3,27 @@
   background: #f3f6f9;
 }
 
+/* ====== Header ====== */
 .header {
   height: auto;
   line-height: normal;
-  padding: 18px 32px;
+  padding: 0;
   background: rgba(255, 255, 255, 0.96);
   border-bottom: 1px solid #e5ebf3;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
   position: sticky;
   top: 0;
   z-index: 20;
   backdrop-filter: blur(10px);
+}
+
+.headerInner {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 16px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
 }
 
 .brand {
@@ -27,6 +34,7 @@
 
 .brandAvatar {
   background: #1677ff;
+  flex-shrink: 0;
 }
 
 .brandTitle {
@@ -36,72 +44,96 @@
 
 .brandSubtitle {
   color: #6b7280;
+  font-size: 13px;
 }
 
+/* ====== Content ====== */
 .content {
-  padding: 28px 0 40px;
+  flex: 1;
 }
 
-.container {
+/* ====== Hero ====== */
+.hero {
+  background: linear-gradient(135deg, #f0f5ff 0%, #e8f1ff 40%, #f3f6f9 100%);
+  padding: 56px 0 48px;
+}
+
+.heroInner {
   max-width: 1280px;
   margin: 0 auto;
   padding: 0 24px;
 }
 
-.heroCard,
-.sideCard,
-.listCard {
-  border-radius: 24px;
-  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.06);
-}
-
-.heroCard {
-  border: 1px solid #e5ebf3;
-}
-
 .heroTag {
-  align-self: flex-start;
+  margin-bottom: 16px;
   margin-inline-end: 0;
 }
 
 .heroTitle {
-  margin: 0 !important;
-  font-size: 42px !important;
-  line-height: 1.15 !important;
+  margin: 0 0 16px !important;
+  font-size: 40px !important;
+  line-height: 1.2 !important;
   color: #0f172a !important;
-}
-
-.heroDescription {
-  margin-bottom: 0 !important;
-  font-size: 16px;
-  color: #475569;
   max-width: 720px;
 }
 
-.heroDivider {
-  margin: 8px 0 0;
+.heroDesc {
+  margin-bottom: 0 !important;
+  font-size: 16px;
+  color: #475569;
+  max-width: 640px;
+  line-height: 1.7;
 }
 
-.actionItem {
-  padding-left: 0 !important;
-  padding-right: 0 !important;
+.heroActions {
+  margin-top: 28px;
 }
 
-.actionAvatar {
-  background: #e8f1ff;
-  color: #1677ff;
+.welcomeAlert {
+  margin-top: 24px;
+  max-width: 640px;
+  border-radius: 12px;
 }
 
-.actionTitle {
-  margin-bottom: 4px;
-  font-size: 15px;
-  font-weight: 600;
-  color: #1f2937;
+/* ====== Stats ====== */
+.statsRow {
+  margin-top: 40px;
+}
+
+.statCard {
+  border-radius: 16px;
+  border: 1px solid #e5ebf3;
+  box-shadow: 0 2px 12px rgba(15, 23, 42, 0.04);
+  text-align: center;
+
+  :global(.ant-statistic-title) {
+    color: #64748b;
+    font-size: 13px;
+  }
+
+  :global(.ant-statistic-content) {
+    color: #1e293b;
+    font-size: 26px;
+  }
+}
+
+/* ====== Main Container ====== */
+.mainContainer {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 32px 24px 48px;
 }
 
 .loadAlert {
-  margin: 24px 0;
+  margin-bottom: 24px;
   border-radius: 16px;
+}
+
+/* ====== Plan Card ====== */
+.planCard {
+  border-radius: 20px;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.05);
+  border: 1px solid #e5ebf3;
 }
 
 .planItem {
@@ -110,26 +142,88 @@
 }
 
 .planTitle {
-  margin: 12px 0 8px !important;
+  margin: 10px 0 8px !important;
   color: #111827 !important;
 }
 
 .planMeta {
   color: #64748b;
+  font-size: 13px;
 }
 
+/* ====== Sidebar ====== */
+.sideCard {
+  border-radius: 20px;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.05);
+  border: 1px solid #e5ebf3;
+}
+
+.quickItem {
+  padding: 6px 0 !important;
+}
+
+.quickAvatar {
+  background: #e8f1ff;
+  color: #1677ff;
+  flex-shrink: 0;
+}
+
+.quickText {
+  font-size: 14px;
+  color: #374151;
+}
+
+/* ====== Footer ====== */
+.footer {
+  background: #fff;
+  border-top: 1px solid #e5ebf3;
+  padding: 24px;
+}
+
+.footerInner {
+  max-width: 1280px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+/* ====== Responsive ====== */
 @media (max-width: 768px) {
-  .header {
-    padding: 16px;
-    align-items: flex-start;
+  .headerInner {
+    padding: 14px 16px;
     flex-direction: column;
+    align-items: flex-start;
   }
 
-  .container {
+  .hero {
+    padding: 36px 0 32px;
+  }
+
+  .heroInner {
     padding: 0 16px;
   }
 
   .heroTitle {
-    font-size: 32px !important;
+    font-size: 28px !important;
+  }
+
+  .heroDesc {
+    font-size: 15px;
+  }
+
+  .mainContainer {
+    padding: 24px 16px 40px;
+  }
+
+  .footerInner {
+    flex-direction: column;
+    text-align: center;
+  }
+
+  .statCard :global(.ant-statistic-content) {
+    font-size: 22px;
   }
 }

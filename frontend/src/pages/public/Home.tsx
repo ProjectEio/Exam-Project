@@ -35,7 +35,7 @@ import useAuthStore from '@/store/auth'
 import type { ExamPlan, Role } from '@/types'
 import styles from './Home.module.scss'
 
-const { Header, Content } = Layout
+const { Header, Content, Footer } = Layout
 
 const planStatusText: Record<ExamPlan['status'], string> = {
   DRAFT: '草稿',
@@ -121,138 +121,103 @@ export default function PublicHome() {
 
   return (
     <Layout className={styles.page}>
+      {/* ====== Header ====== */}
       <Header className={styles.header}>
-        <div className={styles.brand}>
-          <Avatar size={42} className={styles.brandAvatar} icon={<SafetyCertificateOutlined />} />
-          <div>
-            <Typography.Title level={5} className={styles.brandTitle}>
-              省考试院 · 自学考试信息公开
-            </Typography.Title>
-            <Typography.Text className={styles.brandSubtitle}>
-              首页默认公开，先浏览，再决定是否登录
-            </Typography.Text>
+        <div className={styles.headerInner}>
+          <div className={styles.brand}>
+            <Avatar size={40} className={styles.brandAvatar} icon={<SafetyCertificateOutlined />} />
+            <div>
+              <Typography.Title level={5} className={styles.brandTitle}>
+                省考试院 · 自学考试信息公开
+              </Typography.Title>
+              <Typography.Text className={styles.brandSubtitle}>
+                首页默认公开，先浏览，再决定是否登录
+              </Typography.Text>
+            </div>
           </div>
-        </div>
 
-        <Space wrap size={12}>
-          {user ? (
-            <Button type="primary" size="large" onClick={() => navigate(actionPath)}>
-              {actionTitle}
-            </Button>
-          ) : (
-            <>
-              <Button size="large" icon={<LoginOutlined />} onClick={() => navigate('/login')}>
-                登录
+          <Space wrap size={12}>
+            {user ? (
+              <Button type="primary" size="large" onClick={() => navigate(actionPath)}>
+                {actionTitle}
               </Button>
-              <Button
-                type="primary"
-                size="large"
-                icon={<UserAddOutlined />}
-                onClick={() => navigate('/register')}
-              >
-                考生注册
-              </Button>
-            </>
-          )}
-        </Space>
+            ) : (
+              <>
+                <Button size="large" icon={<LoginOutlined />} onClick={() => navigate('/login')}>
+                  登录
+                </Button>
+                <Button type="primary" size="large" icon={<UserAddOutlined />} onClick={() => navigate('/register')}>
+                  考生注册
+                </Button>
+              </>
+            )}
+          </Space>
+        </div>
       </Header>
 
       <Content className={styles.content}>
-        <div className={styles.container}>
-          <Row gutter={[24, 24]}>
-            <Col xs={24} xl={15}>
-              <Card bordered={false} className={styles.heroCard}>
-                <Space direction="vertical" size={16} style={{ width: '100%' }}>
-                  <Tag color="blue" className={styles.heroTag}>
-                    公开访问
-                  </Tag>
-                  <Typography.Title level={1} className={styles.heroTitle}>
-                    所有人都可以先看首页，再选择登录
-                  </Typography.Title>
-                  <Typography.Paragraph className={styles.heroDescription}>
-                    已发布考试计划、考试时间和考点安排在首页直接公开展示。考生登录后可继续报名和查分，教师与管理员登录后进入管理工作台。
-                  </Typography.Paragraph>
-                  <Space wrap size={12}>
-                    <Button
-                      type="primary"
-                      size="large"
-                      icon={<ReadOutlined />}
-                      onClick={() => navigate(actionPath)}
-                    >
-                      {actionTitle}
-                    </Button>
-                    {!user && (
-                      <Button size="large" onClick={() => navigate('/register')}>
-                        先注册账号
-                      </Button>
-                    )}
-                  </Space>
+        {/* ====== Hero Banner ====== */}
+        <section className={styles.hero}>
+          <div className={styles.heroInner}>
+            <Tag color="blue" className={styles.heroTag}>
+              公开访问
+            </Tag>
+            <Typography.Title level={1} className={styles.heroTitle}>
+              自学考试信息公开展示
+            </Typography.Title>
+            <Typography.Paragraph className={styles.heroDesc}>
+              已发布考试计划、考试时间和考点安排在首页直接公开展示。考生登录后可继续报名和查分，教师与管理员登录后进入管理工作台。
+            </Typography.Paragraph>
 
-                  {user && (
-                    <Alert
-                      showIcon
-                      type="success"
-                      message={`欢迎回来，${user.realName || user.username}`}
-                      description="你可以继续浏览公开信息，也可以直接进入已登录工作台。"
-                    />
-                  )}
+            <Space wrap size={12} className={styles.heroActions}>
+              <Button type="primary" size="large" icon={<ReadOutlined />} onClick={() => navigate(actionPath)}>
+                {actionTitle}
+              </Button>
+              {!user && (
+                <Button size="large" onClick={() => navigate('/register')}>
+                  先注册账号
+                </Button>
+              )}
+            </Space>
 
-                  <Divider className={styles.heroDivider} />
+            {user && (
+              <Alert
+                showIcon
+                type="success"
+                className={styles.welcomeAlert}
+                message={`欢迎回来，${user.realName || user.username}`}
+                description="你可以继续浏览公开信息，也可以直接进入已登录工作台。"
+              />
+            )}
 
-                  <Row gutter={[16, 16]}>
-                    <Col xs={12} md={6}>
-                      <Statistic title="已发布计划" value={plans.length} />
-                    </Col>
-                    <Col xs={12} md={6}>
-                      <Statistic title="近期可查" value={upcomingCount} />
-                    </Col>
-                    <Col xs={12} md={6}>
-                      <Statistic title="覆盖专业" value={majorCount} />
-                    </Col>
-                    <Col xs={12} md={6}>
-                      <Statistic title="最近考试日" value={nextExamDate} />
-                    </Col>
-                  </Row>
-                </Space>
-              </Card>
-            </Col>
+            {/* Stats strip */}
+            <Row gutter={[24, 16]} className={styles.statsRow}>
+              <Col xs={12} sm={6}>
+                <Card bordered={false} className={styles.statCard}>
+                  <Statistic title="已发布计划" value={plans.length} suffix="个" />
+                </Card>
+              </Col>
+              <Col xs={12} sm={6}>
+                <Card bordered={false} className={styles.statCard}>
+                  <Statistic title="近期可查" value={upcomingCount} suffix="个" />
+                </Card>
+              </Col>
+              <Col xs={12} sm={6}>
+                <Card bordered={false} className={styles.statCard}>
+                  <Statistic title="覆盖专业" value={majorCount} suffix="个" />
+                </Card>
+              </Col>
+              <Col xs={12} sm={6}>
+                <Card bordered={false} className={styles.statCard}>
+                  <Statistic title="最近考试日" value={nextExamDate} />
+                </Card>
+              </Col>
+            </Row>
+          </div>
+        </section>
 
-            <Col xs={24} xl={9}>
-              <Card title="你现在可以做什么" bordered={false} className={styles.sideCard}>
-                <List
-                  dataSource={[
-                    {
-                      icon: <CalendarOutlined />,
-                      title: '公开查看考试计划',
-                      description: '无需登录即可查看已发布考试计划、考试日期、时段和地点。',
-                    },
-                    {
-                      icon: <LoginOutlined />,
-                      title: '按需登录办理业务',
-                      description: '需要报名、查成绩或管理数据时，再进入登录页即可。',
-                    },
-                    {
-                      icon: <TeamOutlined />,
-                      title: '区分角色进入工作台',
-                      description: '考生进入服务中心，教师和管理员进入统一管理后台。',
-                    },
-                  ]}
-                  renderItem={(item) => (
-                    <List.Item className={styles.actionItem}>
-                      <Space align="start" size={14}>
-                        <Avatar className={styles.actionAvatar} icon={item.icon} />
-                        <div>
-                          <div className={styles.actionTitle}>{item.title}</div>
-                          <Typography.Text type="secondary">{item.description}</Typography.Text>
-                        </div>
-                      </Space>
-                    </List.Item>
-                  )}
-                />
-              </Card>
-            </Col>
-          </Row>
-
+        {/* ====== Main Content ====== */}
+        <div className={styles.mainContainer}>
           {loadError && (
             <Alert
               showIcon
@@ -264,11 +229,12 @@ export default function PublicHome() {
           )}
 
           <Row gutter={[24, 24]}>
-            <Col xs={24} lg={15}>
+            {/* Exam Plans */}
+            <Col xs={24} lg={17}>
               <Card
                 title="已发布考试计划"
                 bordered={false}
-                className={styles.listCard}
+                className={styles.planCard}
                 extra={
                   <Button type="link" onClick={() => navigate(user ? actionPath : '/login')}>
                     {user ? '进入工作台' : '登录后继续办理'}
@@ -276,7 +242,7 @@ export default function PublicHome() {
                 }
               >
                 {loading ? (
-                  <Skeleton active paragraph={{ rows: 6 }} />
+                  <Skeleton active paragraph={{ rows: 5 }} />
                 ) : previewPlans.length === 0 ? (
                   <Empty description="暂无已发布考试计划" />
                 ) : (
@@ -323,31 +289,33 @@ export default function PublicHome() {
               </Card>
             </Col>
 
-            <Col xs={24} lg={9}>
-              <Card title="使用流程" bordered={false} className={styles.sideCard}>
+            {/* Sidebar */}
+            <Col xs={24} lg={7}>
+              <Card title="快速入门" bordered={false} className={styles.sideCard}>
                 <Steps
                   direction="vertical"
                   size="small"
+                  current={-1}
                   items={[
                     {
-                      title: '先浏览公开信息',
-                      description: '访客可以直接查看已发布考试计划与考试安排。',
+                      title: '浏览公开信息',
+                      description: '无需登录，直接查看已发布的考试计划与安排。',
                       icon: <ReadOutlined />,
                     },
                     {
                       title: '按需登录',
-                      description: '需要报名、查分或管理数据时，再进入登录。',
+                      description: '需要报名、查分或管理数据时再登录。',
                       icon: <LoginOutlined />,
                     },
                     {
-                      title: '进入对应工作台',
-                      description: '考生进入服务中心，教师和管理员进入管理工作台。',
+                      title: '进入工作台',
+                      description: '考生进入服务中心，教师和管理员进入后台。',
                       icon: <ScheduleOutlined />,
                     },
                   ]}
                 />
 
-                <Divider />
+                <Divider style={{ margin: '20px 0' }} />
 
                 <Row gutter={[16, 16]}>
                   <Col span={12}>
@@ -357,11 +325,52 @@ export default function PublicHome() {
                     <Statistic title="公开说明" value="即时可看" />
                   </Col>
                 </Row>
+
+                <Divider style={{ margin: '20px 0' }} />
+
+                <List
+                  split={false}
+                  dataSource={[
+                    {
+                      icon: <CalendarOutlined />,
+                      text: '公开查看考试计划',
+                    },
+                    {
+                      icon: <LoginOutlined />,
+                      text: '按需登录办理业务',
+                    },
+                    {
+                      icon: <TeamOutlined />,
+                      text: '区分角色进入工作台',
+                    },
+                  ]}
+                  renderItem={(item) => (
+                    <List.Item className={styles.quickItem}>
+                      <Space size={10}>
+                        <Avatar size={28} className={styles.quickAvatar} icon={item.icon} />
+                        <span className={styles.quickText}>{item.text}</span>
+                      </Space>
+                    </List.Item>
+                  )}
+                />
               </Card>
             </Col>
           </Row>
         </div>
       </Content>
+
+      {/* ====== Footer ====== */}
+      <Footer className={styles.footer}>
+        <div className={styles.footerInner}>
+          <Space split={<Divider type="vertical" />} size={16}>
+            <span>省考试院 · 自学考试信息公开平台</span>
+            <span>首页默认公开，无需登录即可浏览</span>
+          </Space>
+          <Typography.Text type="secondary">
+            © {new Date().getFullYear()} 自学考试信息管理系统
+          </Typography.Text>
+        </div>
+      </Footer>
     </Layout>
   )
 }
