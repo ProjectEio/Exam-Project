@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Spin } from 'antd'
+import { Skeleton } from 'antd'
 import ReactECharts from 'echarts-for-react'
 import {
   overview,
@@ -106,13 +106,11 @@ export default function Statistics() {
     }],
   }
 
-  if (loading) {
-    return (
-      <div className="flex justify-center items-center h-96">
-        <Spin size="large" tip="加载中..." />
-      </div>
-    )
-  }
+  const chartSkeleton = (
+    <div style={{ minHeight: 320, display: 'flex', alignItems: 'center' }}>
+      <Skeleton active title={false} paragraph={{ rows: 9 }} style={{ width: '100%' }} />
+    </div>
+  )
 
   return (
     <div>
@@ -122,8 +120,14 @@ export default function Statistics() {
             className="bg-white rounded-lg shadow-soft p-4 border-l-4"
             style={{ borderLeftColor: c.color }}
           >
-            <div className="text-gray-500 text-sm">{c.label}</div>
-            <div className="text-2xl font-bold mt-1" style={{ color: c.color }}>{c.value}</div>
+            {loading ? (
+              <Skeleton active title={{ width: '46%' }} paragraph={{ rows: 1 }} />
+            ) : (
+              <>
+                <div className="text-gray-500 text-sm">{c.label}</div>
+                <div className="text-2xl font-bold mt-1" style={{ color: c.color }}>{c.value}</div>
+              </>
+            )}
           </div>
         ))}
       </div>
@@ -131,19 +135,19 @@ export default function Statistics() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="bg-white rounded-lg shadow-soft p-4">
           <h3 className="text-base font-semibold m-0 mb-2">报名趋势</h3>
-          <ReactECharts option={trendOption} style={{ height: 320 }} />
+          {loading ? chartSkeleton : <ReactECharts option={trendOption} style={{ height: 320 }} />}
         </div>
         <div className="bg-white rounded-lg shadow-soft p-4">
           <h3 className="text-base font-semibold m-0 mb-2">各课程合格率</h3>
-          <ReactECharts option={passOption} style={{ height: 320 }} />
+          {loading ? chartSkeleton : <ReactECharts option={passOption} style={{ height: 320 }} />}
         </div>
         <div className="bg-white rounded-lg shadow-soft p-4">
           <h3 className="text-base font-semibold m-0 mb-2">专业-计划数分布</h3>
-          <ReactECharts option={distOption} style={{ height: 320 }} />
+          {loading ? chartSkeleton : <ReactECharts option={distOption} style={{ height: 320 }} />}
         </div>
         <div className="bg-white rounded-lg shadow-soft p-4">
           <h3 className="text-base font-semibold m-0 mb-2">成绩状态分布</h3>
-          <ReactECharts option={scoreOption} style={{ height: 320 }} />
+          {loading ? chartSkeleton : <ReactECharts option={scoreOption} style={{ height: 320 }} />}
         </div>
       </div>
     </div>

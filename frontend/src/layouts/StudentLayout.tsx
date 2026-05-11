@@ -1,5 +1,5 @@
-import { useMemo } from 'react'
-import { Layout, Menu, Avatar, Dropdown, App } from 'antd'
+import { Suspense, useMemo } from 'react'
+import { Layout, Menu, Avatar, Dropdown, App, Skeleton } from 'antd'
 import type { MenuProps } from 'antd'
 import {
   HomeOutlined,
@@ -59,6 +59,22 @@ export default function StudentLayout() {
     },
   ]
 
+  const outletFallback = (
+    <div className={styles.routeLoading}>
+      <Skeleton.Input active size="small" className={styles.routeLoadingTitle} />
+      <div className={styles.routeLoadingGrid}>
+        {Array.from({ length: 2 }).map((_, idx) => (
+          <div key={idx} className={styles.routeLoadingCard}>
+            <Skeleton active paragraph={{ rows: 2 }} />
+          </div>
+        ))}
+      </div>
+      <div className={styles.routeLoadingPanel}>
+        <Skeleton active title={{ width: '26%' }} paragraph={{ rows: 10 }} />
+      </div>
+    </div>
+  )
+
   return (
     <Layout className={styles.layout}>
       <Header className={styles.header}>
@@ -94,7 +110,9 @@ export default function StudentLayout() {
       <Content className={styles.content}>
         <div className={styles.contentInner}>
           <div className={styles.contentCard}>
-            <Outlet />
+            <Suspense fallback={outletFallback}>
+              <Outlet />
+            </Suspense>
           </div>
         </div>
       </Content>

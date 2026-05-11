@@ -27,8 +27,10 @@ const StudentMyScore = lazy(() => import('@/pages/student/score/MyScore'))
 const StudentProfile = lazy(() => import('@/pages/student/profile/Profile'))
 
 const Loading = (
-  <div className="h-screen flex items-center justify-center">
-    <Spin size="large" tip="加载中..." />
+  <div className="min-h-screen bg-slate-50 flex items-center justify-center px-6">
+    <div className="w-full max-w-xl rounded-3xl border border-slate-200 bg-white/90 p-10 shadow-sm text-center">
+      <Spin size="large" tip="页面加载中..." />
+    </div>
   </div>
 )
 

@@ -189,6 +189,42 @@
   box-shadow: 0 18px 40px rgba(15, 23, 42, 0.06);
 }
 
+.routeLoading {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.routeLoadingTitle {
+  width: 220px !important;
+  max-width: 42%;
+  height: 18px !important;
+  border-radius: 999px;
+}
+
+.routeLoadingGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.routeLoadingCard,
+.routeLoadingPanel {
+  padding: 18px 20px;
+  border-radius: 18px;
+  border: 1px solid #edf2f7;
+  background: #f8fafc;
+}
+
+.routeLoadingPanel {
+  min-height: 340px;
+}
+
+.routeLoadingCard :global(.ant-skeleton),
+.routeLoadingPanel :global(.ant-skeleton) {
+  width: 100%;
+}
+
 .sidebarFooter {
   padding: 14px 16px;
   border-top: 1px solid #edf2f7;

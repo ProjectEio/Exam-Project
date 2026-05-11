@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Avatar, Card, Col, Empty, Row, Space, Spin, Statistic, Tag, Typography } from 'antd'
+import { Avatar, Card, Col, Empty, Row, Space, Statistic, Tag, Typography } from 'antd'
 import ReactECharts from 'echarts-for-react'
 import {
   UserOutlined,
@@ -135,17 +135,9 @@ export default function Dashboard() {
     ],
   }
 
-  if (loading) {
-    return (
-      <div className="flex justify-center items-center h-96">
-        <Spin size="large" tip="加载中..." />
-      </div>
-    )
-  }
-
   return (
     <div className={s.page}>
-      <Card bordered={false} className={s.heroCard}>
+      <Card bordered={false} className={s.heroCard} loading={loading}>
         <Row gutter={[24, 24]} align="middle" justify="space-between">
           <Col xs={24} lg={16}>
             <Space direction="vertical" size={8}>
@@ -170,7 +162,7 @@ export default function Dashboard() {
       <Row gutter={[16, 16]}>
         {summaryItems.map((item) => (
           <Col xs={24} sm={12} xl={6} key={item.key}>
-            <Card bordered={false} className={`${s.statCard} ${item.className}`}>
+            <Card bordered={false} className={`${s.statCard} ${item.className}`} loading={loading}>
               <div className={s.statHeader}>
                 <Avatar size={46} className={s.statAvatar} icon={item.icon} />
                 <Tag className={s.statHint}>{item.hint}</Tag>
@@ -183,17 +175,17 @@ export default function Dashboard() {
 
       <Row gutter={[16, 16]}>
         <Col xs={24} xl={24}>
-          <Card bordered={false} title="报名趋势" className={s.chartCard}>
+          <Card bordered={false} title="报名趋势" className={s.chartCard} loading={loading}>
             {trend.length ? <ReactECharts option={trendOption} style={{ height: 300 }} /> : <Empty description="暂无趋势数据" />}
           </Card>
         </Col>
         <Col xs={24} xl={12}>
-          <Card bordered={false} title="课程合格率 Top10" className={s.chartCard}>
+          <Card bordered={false} title="课程合格率 Top10" className={s.chartCard} loading={loading}>
             {passTop.length ? <ReactECharts option={passOption} style={{ height: 320 }} /> : <Empty description="暂无成绩数据" />}
           </Card>
         </Col>
         <Col xs={24} xl={12}>
-          <Card bordered={false} title="专业计划分布" className={s.chartCard}>
+          <Card bordered={false} title="专业计划分布" className={s.chartCard} loading={loading}>
             {dist.length ? <ReactECharts option={distOption} style={{ height: 320 }} /> : <Empty description="暂无分布数据" />}
           </Card>
         </Col>

@@ -1,5 +1,5 @@
-import { useMemo } from 'react'
-import { Layout, Menu, Avatar, Dropdown, App } from 'antd'
+import { Suspense, useMemo } from 'react'
+import { Layout, Menu, Avatar, Dropdown, App, Skeleton } from 'antd'
 import type { MenuProps } from 'antd'
 import {
   DashboardOutlined,
@@ -79,6 +79,22 @@ export default function AdminLayout() {
     },
   ]
 
+  const outletFallback = (
+    <div className={styles.routeLoading}>
+      <Skeleton.Input active size="small" className={styles.routeLoadingTitle} />
+      <div className={styles.routeLoadingGrid}>
+        {Array.from({ length: 3 }).map((_, idx) => (
+          <div key={idx} className={styles.routeLoadingCard}>
+            <Skeleton active paragraph={{ rows: 2 }} />
+          </div>
+        ))}
+      </div>
+      <div className={styles.routeLoadingPanel}>
+        <Skeleton active title={{ width: '24%' }} paragraph={{ rows: 10 }} />
+      </div>
+    </div>
+  )
+
   return (
     <Layout className={styles.layout}>
       <Sider width={272} className={styles.sider}>
@@ -138,7 +154,9 @@ export default function AdminLayout() {
 
         <Content className={styles.content}>
           <div className={styles.contentCard}>
-            <Outlet />
+            <Suspense fallback={outletFallback}>
+              <Outlet />
+            </Suspense>
           </div>
         </Content>
       </Layout>
