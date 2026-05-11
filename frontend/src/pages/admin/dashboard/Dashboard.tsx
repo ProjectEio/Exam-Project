@@ -43,6 +43,11 @@ export default function Dashboard() {
     weekday: 'long',
   })
 
+  const asNumber = (value: unknown) => {
+    const num = Number(value ?? 0)
+    return Number.isFinite(num) ? num : 0
+  }
+
   const summaryItems = useMemo(
     () => [
       {
@@ -92,7 +97,7 @@ export default function Dashboard() {
     grid: { left: 40, right: 20, top: 20, bottom: 40 },
     series: [
       {
-        data: trend.map((i) => i.value),
+        data: trend.map((i) => asNumber(i.value)),
         type: 'line',
         smooth: true,
         areaStyle: { color: 'rgba(30,64,175,0.15)' },
@@ -110,7 +115,7 @@ export default function Dashboard() {
     grid: { left: 110, right: 30, top: 10, bottom: 30 },
     series: [
       {
-        data: passTop.map((i) => i.value),
+        data: passTop.map((i) => asNumber(i.value)),
         type: 'bar',
         itemStyle: { color: '#f59e0b', borderRadius: [0, 4, 4, 0] },
       },
@@ -124,7 +129,7 @@ export default function Dashboard() {
       {
         type: 'pie',
         radius: ['40%', '70%'],
-        data: dist.map((i) => ({ name: i.label, value: i.value })),
+        data: dist.map((i) => ({ name: i.label, value: asNumber(i.value) })),
         label: { formatter: '{b}: {c}' },
       },
     ],

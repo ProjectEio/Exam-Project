@@ -41,12 +41,18 @@ public interface StatisticsMapper {
     Long countPassScore();
 
     @Select("""
-            SELECT (CAST(exam_year AS TEXT) || '-' || exam_term) AS label, COUNT(*) AS value
-            FROM sys_registration r
-            JOIN sys_exam_plan p ON p.id = r.plan_id
-            WHERE r.deleted = 0
-            GROUP BY p.exam_year, p.exam_term
-            ORDER BY p.exam_year ASC, p.exam_term ASC
+                        SELECT (CAST(p.exam_year AS TEXT) || '-' || p.exam_term) AS label,
+                                   COUNT(r.id) AS value
+                        FROM sys_exam_plan p
+                        LEFT JOIN sys_registration r ON r.plan_id = p.id AND r.deleted = 0
+                        WHERE p.deleted = 0
+                        GROUP BY p.exam_year, p.exam_term
+                        ORDER BY p.exam_year ASC,
+                                         CASE p.exam_term
+                                                 WHEN '上' THEN 1
+                                                 WHEN '下' THEN 2
+                                                 ELSE 9
+                                         END ASC
             """)
     List<ChartItem> registrationTrend();
 

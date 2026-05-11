@@ -38,9 +38,9 @@ INSERT INTO sys_major_course (major_id, course_id, is_required) VALUES
 INSERT INTO sys_exam_plan (plan_code, plan_name, exam_year, exam_term, course_id, major_id, exam_date, start_time, end_time, location, capacity, registered_count, register_start, register_end, status, remark) VALUES
 ('PLAN202501-001', '2025年上半年-思想道德修养与法律基础', 2025, '上', 1, NULL, '2025-04-12', '09:00', '11:30', '省考试院第一考场', 200, 3, '2025-02-01', '2025-03-15', 'FINISHED', '已结束'),
 ('PLAN202501-002', '2025年上半年-毛中特概论',           2025, '上', 2, NULL, '2025-04-12', '14:30', '17:00', '省考试院第一考场', 200, 2, '2025-02-01', '2025-03-15', 'FINISHED', '已结束'),
-('PLAN202502-001', '2025年下半年-操作系统',             2025, '下', 5, 1,    '2025-10-25', '09:00', '11:30', '省考试院第二考场', 150, 0, '2025-08-01', '2025-09-15', 'PUBLISHED', '计算机专业'),
-('PLAN202502-002', '2025年下半年-C++程序设计',          2025, '下', 6, 1,    '2025-10-25', '14:30', '17:00', '省考试院第二考场', 150, 0, '2025-08-01', '2025-09-15', 'PUBLISHED', '计算机专业'),
-('PLAN202601-001', '2026年上半年-财务管理学',           2026, '上', 7, 2,    '2026-04-11', '09:00', '11:30', '省考试院第三考场', 180, 0, '2026-02-01', '2026-03-15', 'PUBLISHED', '会计学专业'),
+('PLAN202502-001', '2025年下半年-操作系统',             2025, '下', 5, 1,    '2025-10-25', '09:00', '11:30', '省考试院第二考场', 150, 2, '2025-08-01', '2025-09-15', 'PUBLISHED', '计算机专业'),
+('PLAN202502-002', '2025年下半年-C++程序设计',          2025, '下', 6, 1,    '2025-10-25', '14:30', '17:00', '省考试院第二考场', 150, 1, '2025-08-01', '2025-09-15', 'PUBLISHED', '计算机专业'),
+('PLAN202601-001', '2026年上半年-财务管理学',           2026, '上', 7, 2,    '2026-04-11', '09:00', '11:30', '省考试院第三考场', 180, 2, '2026-02-01', '2026-03-15', 'PUBLISHED', '会计学专业'),
 ('PLAN202601-002', '2026年上半年-公司法',               2026, '上',11, 4,    '2026-04-11', '14:30', '17:00', '省考试院第三考场', 180, 0, '2026-02-01', '2026-03-15', 'DRAFT', '法学专业-草稿');
 
 INSERT INTO sys_registration (student_id, plan_id, registration_no, admission_ticket_no, payment_status, status) VALUES
@@ -48,7 +48,12 @@ INSERT INTO sys_registration (student_id, plan_id, registration_no, admission_ti
 (3, 2, 'REG2025010002', 'AT2025010301002', 'PAID',   'APPROVED'),
 (4, 1, 'REG2025010003', 'AT2025010301003', 'PAID',   'APPROVED'),
 (5, 1, 'REG2025010004', 'AT2025010301004', 'PAID',   'APPROVED'),
-(4, 2, 'REG2025010005', 'AT2025010301005', 'PAID',   'APPROVED');
+(4, 2, 'REG2025010005', 'AT2025010301005', 'PAID',   'APPROVED'),
+(3, 3, 'REG2025020001', NULL,              'PAID',   'APPROVED'),
+(4, 3, 'REG2025020002', NULL,              'UNPAID', 'PENDING'),
+(5, 4, 'REG2025020003', NULL,              'PAID',   'APPROVED'),
+(3, 5, 'REG2026010001', NULL,              'UNPAID', 'PENDING'),
+(4, 5, 'REG2026010002', NULL,              'PAID',   'APPROVED');
 
 INSERT INTO sys_score (student_id, course_id, plan_id, exam_year, exam_term, score, status, exam_date) VALUES
 (3, 1, 1, 2025, '上', 85.0, 'PASS',   '2025-04-12'),

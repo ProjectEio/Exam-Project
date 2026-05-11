@@ -36,6 +36,11 @@ export default function Statistics() {
       .finally(() => setLoading(false))
   }, [])
 
+  const asNumber = (value: unknown) => {
+    const num = Number(value ?? 0)
+    return Number.isFinite(num) ? num : 0
+  }
+
   const cards: { label: string; value: number | string; color: string }[] = [
     { label: '用户总数', value: stats?.userCount ?? 0, color: '#1e40af' },
     { label: '学生总数', value: stats?.studentCount ?? 0, color: '#10b981' },
@@ -53,7 +58,7 @@ export default function Statistics() {
     yAxis: { type: 'value' },
     grid: { left: 40, right: 20, top: 30, bottom: 40 },
     series: [{
-      data: trend.map((i) => i.value),
+      data: trend.map((i) => asNumber(i.value)),
       type: 'line',
       smooth: true,
       areaStyle: { color: 'rgba(30,64,175,0.15)' },
@@ -68,7 +73,7 @@ export default function Statistics() {
     yAxis: { type: 'value', max: 100, name: '%' },
     grid: { left: 50, right: 20, top: 30, bottom: 80 },
     series: [{
-      data: pass.map((i) => i.value),
+      data: pass.map((i) => asNumber(i.value)),
       type: 'bar',
       itemStyle: { color: '#f59e0b', borderRadius: [4, 4, 0, 0] },
     }],
@@ -80,7 +85,7 @@ export default function Statistics() {
     series: [{
       type: 'pie',
       radius: ['40%', '70%'],
-      data: dist.map((i) => ({ name: i.label, value: i.value })),
+      data: dist.map((i) => ({ name: i.label, value: asNumber(i.value) })),
       label: { formatter: '{b}: {c}' },
     }],
   }
@@ -95,7 +100,7 @@ export default function Statistics() {
       radius: '70%',
       data: scoreDist.map((i) => ({
         name: scoreLabelMap[i.label] || i.label,
-        value: i.value,
+        value: asNumber(i.value),
         itemStyle: { color: scoreColorMap[i.label] },
       })),
     }],
