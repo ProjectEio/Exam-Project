@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import {
-  Table, Button, Input, Space, Tag, Modal, Form, Popconfirm, App, InputNumber, Select,
+  Table, Button, Input, Space, Tag, Modal, Form, Popconfirm, App, InputNumber, Select, Card,
 } from 'antd'
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons'
 import { pageCourse, addCourse, updCourse, delCourse } from '@/api/course'
@@ -21,6 +21,7 @@ export default function CourseList() {
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState<Course | null>(null)
   const [form] = Form.useForm()
+  const initialLoading = loading && data.length === 0
 
   const load = async () => {
     setLoading(true)
@@ -73,7 +74,8 @@ export default function CourseList() {
 
   return (
     <div>
-      <div className="bg-white p-4 rounded-lg shadow-soft mb-4 flex flex-wrap gap-3 items-center">
+      <Card bordered={false} className="rounded-2xl shadow-soft mb-4" loading={initialLoading}>
+        <div className="flex flex-wrap gap-3 items-center">
         <Input.Search
           placeholder="搜索课程代码/名称"
           allowClear
@@ -81,14 +83,15 @@ export default function CourseList() {
           onSearch={(v) => setQuery({ ...query, keyword: v, current: 1 })}
         />
         <Button type="primary" icon={<PlusOutlined />} onClick={onAdd}>新增课程</Button>
-      </div>
+        </div>
+      </Card>
 
-      <div className="bg-white rounded-lg shadow-soft p-4">
+      <Card bordered={false} className="rounded-2xl shadow-soft" loading={initialLoading}>
         <Table
           rowKey="id"
           dataSource={data}
           columns={columns as any}
-          loading={loading}
+          loading={!initialLoading && loading}
           pagination={{
             current: query.current,
             pageSize: query.size,
@@ -97,7 +100,7 @@ export default function CourseList() {
             onChange: (page, size) => setQuery({ ...query, current: page, size }),
           }}
         />
-      </div>
+      </Card>
 
       <Modal
         title={editing ? '编辑课程' : '新增课程'}

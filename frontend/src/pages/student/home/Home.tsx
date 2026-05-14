@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { App, Avatar, Button, Card, Col, Empty, List, Row, Space, Spin, Statistic, Tag, Typography } from 'antd'
+import { App, Avatar, Button, Card, Col, Empty, List, Row, Space, Statistic, Tag, Typography } from 'antd'
 import {
   CalendarOutlined,
   CheckCircleOutlined,
@@ -51,6 +51,7 @@ export default function StudentHome() {
     [regs]
   )
   const nextExamDate = useMemo(() => plans.find((item) => item.examDate)?.examDate || '待定', [plans])
+  const initialLoading = loading && plans.length === 0 && regs.length === 0
 
   useEffect(() => {
     let cancelled = false
@@ -112,6 +113,7 @@ export default function StudentHome() {
     <div className="space-y-6">
       <Card
         bordered={false}
+        loading={initialLoading}
         style={{ borderRadius: 24, boxShadow: '0 18px 40px rgba(15, 23, 42, 0.06)' }}
       >
         <Row gutter={[24, 24]} align="middle">
@@ -172,11 +174,11 @@ export default function StudentHome() {
         ))}
       </Row>
 
-      <Spin spinning={loading}>
-        <Row gutter={[24, 24]}>
+      <Row gutter={[24, 24]}>
           <Col xs={24} lg={12}>
           <Card
             bordered={false}
+            loading={initialLoading}
             style={{ borderRadius: 20, height: '100%', boxShadow: '0 18px 40px rgba(15, 23, 42, 0.06)' }}
             title={
               <span className="flex items-center gap-2">
@@ -226,6 +228,7 @@ export default function StudentHome() {
           <Col xs={24} lg={12}>
           <Card
             bordered={false}
+            loading={initialLoading}
             style={{ borderRadius: 20, height: '100%', boxShadow: '0 18px 40px rgba(15, 23, 42, 0.06)' }}
             title={
               <span className="flex items-center gap-2">
@@ -276,7 +279,6 @@ export default function StudentHome() {
           </Card>
           </Col>
         </Row>
-      </Spin>
     </div>
   )
 }

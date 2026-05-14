@@ -34,6 +34,7 @@ export default function MyRegistration() {
   const { message } = App.useApp()
   const [data, setData] = useState<Registration[]>([])
   const [loading, setLoading] = useState(false)
+  const initialLoading = loading && data.length === 0
 
   const load = async () => {
     setLoading(true)
@@ -177,6 +178,7 @@ export default function MyRegistration() {
   return (
     <Card
       className="rounded-2xl shadow-soft"
+      loading={initialLoading}
       title={
         <span className="font-semibold text-gray-800">
           我的报名记录
@@ -193,7 +195,7 @@ export default function MyRegistration() {
     >
       <Table<Registration>
         rowKey="id"
-        loading={loading}
+        loading={!initialLoading && loading}
         dataSource={data}
         columns={columns}
         scroll={{ x: 1100 }}

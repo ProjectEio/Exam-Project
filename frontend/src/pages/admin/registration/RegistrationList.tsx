@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import {
-  Table, Button, Input, Space, Tag, Modal, Form, Popconfirm, App, Select,
+  Table, Button, Input, Space, Tag, Modal, Form, Popconfirm, App, Select, Card,
 } from 'antd'
 import {
   ExportOutlined, CheckOutlined, CloseOutlined, DownloadOutlined,
@@ -25,6 +25,7 @@ export default function RegistrationList() {
   const [rejectOpen, setRejectOpen] = useState(false)
   const [rejectTarget, setRejectTarget] = useState<Registration | null>(null)
   const [form] = Form.useForm()
+  const initialLoading = loading && data.length === 0
 
   const load = async () => {
     setLoading(true)
@@ -139,7 +140,8 @@ export default function RegistrationList() {
 
   return (
     <div>
-      <div className="bg-white p-4 rounded-lg shadow-soft mb-4 flex flex-wrap gap-3 items-center">
+      <Card bordered={false} className="rounded-2xl shadow-soft mb-4" loading={initialLoading}>
+        <div className="flex flex-wrap gap-3 items-center">
         <Select placeholder="审核状态" allowClear style={{ width: 130 }} value={query.status}
           onChange={(v) => setQuery({ ...query, status: v, current: 1 })}
           options={[
@@ -156,16 +158,17 @@ export default function RegistrationList() {
         <Input.Search placeholder="搜索报名编号/学生" allowClear style={{ width: 240 }}
           onSearch={(v) => setQuery({ ...query, keyword: v, current: 1 })} />
         <Button icon={<ExportOutlined />} onClick={onExport}>导出 Excel</Button>
-      </div>
+        </div>
+      </Card>
 
-      <div className="bg-white rounded-lg shadow-soft p-4">
-        <Table rowKey="id" dataSource={data} columns={columns as any} loading={loading}
+      <Card bordered={false} className="rounded-2xl shadow-soft" loading={initialLoading}>
+        <Table rowKey="id" dataSource={data} columns={columns as any} loading={!initialLoading && loading}
           scroll={{ x: 1400 }}
           pagination={{
             current: query.current, pageSize: query.size, total, showSizeChanger: true,
             onChange: (page, size) => setQuery({ ...query, current: page, size }),
           }} />
-      </div>
+      </Card>
 
       <Modal title="填写拒绝原因" open={rejectOpen}
         onCancel={() => setRejectOpen(false)} onOk={onRejectOk} destroyOnClose>

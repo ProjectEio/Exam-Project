@@ -28,6 +28,7 @@ export default function PlanList() {
   const [courses, setCourses] = useState<Course[]>([])
   const [majors, setMajors] = useState<Major[]>([])
   const [form] = Form.useForm()
+  const initialLoading = loading && data.length === 0
 
   const load = async () => {
     setLoading(true)
@@ -134,7 +135,7 @@ export default function PlanList() {
 
   return (
     <div>
-      <Card bordered={false} className="mb-4 rounded-2xl shadow-soft">
+      <Card bordered={false} className="mb-4 rounded-2xl shadow-soft" loading={initialLoading}>
         <Row gutter={[24, 24]} align="middle" justify="space-between">
           <Col xs={24} xl={14}>
             <Typography.Title level={3} style={{ margin: 0 }}>
@@ -167,8 +168,8 @@ export default function PlanList() {
         </Row>
       </Card>
 
-      <Card bordered={false} className="rounded-2xl shadow-soft">
-        <Table rowKey="id" dataSource={data} columns={columns as any} loading={loading}
+      <Card bordered={false} className="rounded-2xl shadow-soft" loading={initialLoading}>
+        <Table rowKey="id" dataSource={data} columns={columns as any} loading={!initialLoading && loading}
           scroll={{ x: 1700 }}
           pagination={{
             current: query.current, pageSize: query.size, total, showSizeChanger: true,

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import {
   Table, Button, Input, Space, Tag, Modal, Form, Popconfirm, App,
-  InputNumber, Select, DatePicker, Upload,
+  InputNumber, Select, DatePicker, Upload, Card,
 } from 'antd'
 import {
   PlusOutlined, EditOutlined, DeleteOutlined, UploadOutlined,
@@ -33,6 +33,7 @@ export default function ScoreList() {
   const [importOpen, setImportOpen] = useState(false)
   const [importRes, setImportRes] = useState<ImportResult | null>(null)
   const [form] = Form.useForm()
+  const initialLoading = loading && data.length === 0
 
   const load = async () => {
     setLoading(true)
@@ -99,7 +100,8 @@ export default function ScoreList() {
 
   return (
     <div>
-      <div className="bg-white p-4 rounded-lg shadow-soft mb-4 flex flex-wrap gap-3 items-center">
+      <Card bordered={false} className="rounded-2xl shadow-soft mb-4" loading={initialLoading}>
+        <div className="flex flex-wrap gap-3 items-center">
         <Select placeholder="年份" allowClear style={{ width: 110 }} value={query.examYear}
           onChange={(v) => setQuery({ ...query, examYear: v, current: 1 })}
           options={[{ value: 2024 }, { value: 2025 }, { value: 2026 }]} />
@@ -130,15 +132,16 @@ export default function ScoreList() {
           }}>
           <Button icon={<UploadOutlined />}>批量导入</Button>
         </Upload>
-      </div>
+        </div>
+      </Card>
 
-      <div className="bg-white rounded-lg shadow-soft p-4">
-        <Table rowKey="id" dataSource={data} columns={columns as any} loading={loading}
+      <Card bordered={false} className="rounded-2xl shadow-soft" loading={initialLoading}>
+        <Table rowKey="id" dataSource={data} columns={columns as any} loading={!initialLoading && loading}
           pagination={{
             current: query.current, pageSize: query.size, total, showSizeChanger: true,
             onChange: (page, size) => setQuery({ ...query, current: page, size }),
           }} />
-      </div>
+      </Card>
 
       <Modal title={editing ? '编辑成绩' : '录入成绩'} open={open}
         onCancel={() => setOpen(false)} onOk={onSave} destroyOnClose>
