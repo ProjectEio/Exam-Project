@@ -20,7 +20,7 @@ spring:
       connection-test-query: SELECT 1
   sql:
     init:
-      mode: always
+      mode: never
       schema-locations: classpath:db/schema.sql
       data-locations: classpath:db/data.sql
       continue-on-error: true
