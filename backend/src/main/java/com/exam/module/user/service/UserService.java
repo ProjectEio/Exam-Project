@@ -1,13 +1,11 @@
 package com.exam.module.user.service;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.exam.common.BizException;
 import com.exam.common.PageResult;
 import com.exam.module.user.dto.UserQueryDTO;
 import com.exam.module.user.dto.UserSaveDTO;
 import com.exam.module.user.entity.User;
-import com.exam.module.user.mapper.UserMapper;
+import com.exam.shard.UserShardRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -17,32 +15,17 @@ import org.springframework.util.StringUtils;
 public class UserService {
 
     @Autowired
-    private UserMapper userMapper;
+    private UserShardRepository userRepo;
 
     @Autowired
     private PasswordEncoder passwordEncoder;
 
     public PageResult<User> page(UserQueryDTO query) {
-        Page<User> page = new Page<>(query.getCurrent(), query.getSize());
-        LambdaQueryWrapper<User> wrapper = new LambdaQueryWrapper<>();
-        if (StringUtils.hasText(query.getRole())) {
-            wrapper.eq(User::getRole, query.getRole());
-        }
-        if (query.getStatus() != null) {
-            wrapper.eq(User::getStatus, query.getStatus());
-        }
-        if (StringUtils.hasText(query.getKeyword())) {
-            String kw = query.getKeyword();
-            wrapper.and(w -> w.like(User::getUsername, kw)
-                    .or().like(User::getRealName, kw)
-                    .or().like(User::getPhone, kw));
-        }
-        wrapper.orderByDesc(User::getId);
-        return PageResult.of(userMapper.selectPage(page, wrapper));
+        return userRepo.page(query);
     }
 
     public User detail(Long id) {
-        User u = userMapper.selectById(id);
+        User u = userRepo.findById(id);
         if (u == null) throw new BizException("用户不存在");
         return u;
     }
@@ -60,24 +43,22 @@ public class UserService {
         user.setStatus(dto.getStatus() == null ? 1 : dto.getStatus());
 
         if (dto.getId() == null) {
-            // 新增：EXISTS + LIMIT 1，命中即返回，无需全表 COUNT
-            if (userMapper.existsByUsername(dto.getUsername()) != null) throw new BizException("用户名已存在");
+            if (userRepo.existsByUsername(dto.getUsername())) throw new BizException("用户名已存在");
             if (!StringUtils.hasText(dto.getPassword())) throw new BizException("新增用户需指定密码");
             user.setPassword(passwordEncoder.encode(dto.getPassword()));
-            userMapper.insert(user);
+            userRepo.insert(user);
         } else {
-            // 更新
-            User exist = userMapper.selectById(dto.getId());
+            User exist = userRepo.findById(dto.getId());
             if (exist == null) throw new BizException("用户不存在");
             if (StringUtils.hasText(dto.getPassword())) {
                 user.setPassword(passwordEncoder.encode(dto.getPassword()));
             }
-            userMapper.updateById(user);
+            userRepo.update(user);
         }
     }
 
     public void delete(Long id) {
-        userMapper.deleteById(id);
+        userRepo.deleteById(id);
     }
 
     public void resetPassword(Long id, String newPwd) {
@@ -85,6 +66,6 @@ public class UserService {
         User u = new User();
         u.setId(id);
         u.setPassword(passwordEncoder.encode(newPwd));
-        userMapper.updateById(u);
+        userRepo.update(u);
     }
 }

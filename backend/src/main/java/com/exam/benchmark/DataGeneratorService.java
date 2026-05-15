@@ -4,12 +4,17 @@ import com.exam.shard.RegistrationShardRepository;
 import com.exam.shard.ScoreShardRepository;
 import com.exam.shard.ShardDataSourceConfig;
 import com.exam.shard.ShardRouter;
+import com.exam.shard.UserShardDataSourceConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
+import javax.sql.DataSource;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
@@ -50,12 +55,110 @@ public class DataGeneratorService {
     @Autowired private ScoreShardRepository        scoreRepo;
     @Autowired private RegistrationShardRepository regRepo;
 
+    /** 用户分片数据源（generateUsers 直接批量写入，绕过 ORM 开销） */
+    @Autowired
+    @Qualifier("userShardDataSources")
+    private DataSource[] userShardDataSources;
+
     // ── 进度追踪 ──────────────────────────────────────────
     public final AtomicLong scoreInserted = new AtomicLong(0);
     public final AtomicLong regInserted   = new AtomicLong(0);
+    public final AtomicLong userInserted  = new AtomicLong(0);
     public volatile boolean running       = false;
     public volatile String  lastError     = null;
     public volatile long    startTimeMs   = 0;
+
+    // ─────────────────────────────────────────────────────
+    //  用户 10 万 生成（主库 sys_user）
+    // ─────────────────────────────────────────────────────
+
+    /**
+     * 向 8 个用户分片并行写入 10 万学生账号。
+     * ID 范围: BASE_STUDENT_ID ~ BASE_STUDENT_ID+TOTAL_STUDENTS-1
+     * 与分片成绩/报名表的 student_id 完全对应。
+     */
+    public void generateUsers() {
+        final int numShards = UserShardDataSourceConfig.NUM_SHARDS;
+        final ShardRouter router = new ShardRouter(numShards);
+        final String PWD_HASH = "$2a$10$DZyY1hz9uXKjUp4LSXx8UOchNHXGdGutWFtDuGZ5AGXlpx/yi9y6i";
+        final String[] GENDERS = {"男", "女"};
+        final String INSERT_SQL =
+                "INSERT OR IGNORE INTO sys_user(id,username,password,role,real_name,id_card,phone,gender,status)"
+                + " VALUES(?,?,?,?,?,?,?,?,1)";
+
+        // 按分片预分配 ID
+        @SuppressWarnings("unchecked")
+        List<long[]>[] shardIds = new List[numShards];
+        for (int s = 0; s < numShards; s++) shardIds[s] = new ArrayList<>();
+        for (int i = 0; i < TOTAL_STUDENTS; i++) {
+            long id = BASE_STUDENT_ID + i;
+            shardIds[router.route(id)].add(new long[]{id, i});
+        }
+
+        // 检查是否已存在（任意分片查一下）
+        try {
+            Long cnt = new JdbcTemplate(userShardDataSources[0]).queryForObject(
+                    "SELECT COUNT(*) FROM sys_user WHERE id >= " + BASE_STUDENT_ID, Long.class);
+            if (cnt != null && cnt > 0) {
+                log.info("[UserGen] 用户分片已存在数据，跳过生成");
+                long total = 0;
+                for (DataSource ds : userShardDataSources) {
+                    Long c = new JdbcTemplate(ds).queryForObject(
+                            "SELECT COUNT(*) FROM sys_user WHERE id >= " + BASE_STUDENT_ID, Long.class);
+                    if (c != null) total += c;
+                }
+                userInserted.set(total);
+                return;
+            }
+        } catch (Exception ignored) {}
+
+        log.info("[UserGen] 开始并行写入 {} 条学生账号到 {} 个分片...", TOTAL_STUDENTS, numShards);
+        ExecutorService pool = Executors.newFixedThreadPool(numShards);
+        List<Future<Long>> futures = new ArrayList<>(numShards);
+
+        for (int s = 0; s < numShards; s++) {
+            final int shardIdx = s;
+            final List<long[]> ids = shardIds[s];
+            final DataSource ds = userShardDataSources[s];
+            futures.add(pool.submit(() -> {
+                try (Connection conn = ds.getConnection()) {
+                    conn.setAutoCommit(false);
+                    try (PreparedStatement ps = conn.prepareStatement(INSERT_SQL)) {
+                        int batchCnt = 0;
+                        for (long[] entry : ids) {
+                            long id = entry[0];
+                            int  i  = (int) entry[1];
+                            ps.setLong(1, id);
+                            ps.setString(2, "stu_" + id);
+                            ps.setString(3, PWD_HASH);
+                            ps.setString(4, "STUDENT");
+                            ps.setString(5, "学生" + id);
+                            ps.setString(6, String.format("1101012000%06d%04d", i % 1000000, i % 10000));
+                            ps.setString(7, String.format("139%08d", i % 100000000));
+                            ps.setString(8, GENDERS[i % 2]);
+                            ps.addBatch();
+                            if (++batchCnt % BATCH_SIZE == 0) {
+                                ps.executeBatch();
+                                conn.commit();
+                                userInserted.addAndGet(BATCH_SIZE);
+                            }
+                        }
+                        ps.executeBatch();
+                        conn.commit();
+                        int rem = ids.size() % BATCH_SIZE;
+                        if (rem > 0) userInserted.addAndGet(rem);
+                    }
+                }
+                log.info("[UserGen] 分片[{}] 完成, 共 {} 条", shardIdx, ids.size());
+                return (long) ids.size();
+            }));
+        }
+        pool.shutdown();
+        for (Future<Long> f : futures) {
+            try { f.get(); } catch (Exception e) { log.error("[UserGen] 分片写入失败", e); }
+        }
+        log.info("[UserGen] 完成，共写入 {} 条", userInserted.get());
+    }
 
     // ─────────────────────────────────────────────────────
     //  成绩 2000万 生成

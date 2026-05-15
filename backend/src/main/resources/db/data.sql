@@ -1,12 +1,6 @@
 -- 演示数据 (BCrypt 密码统一为 123456)
 -- 哈希值为 $2a$10$DZyY1hz9uXKjUp4LSXx8UOchNHXGdGutWFtDuGZ5AGXlpx/yi9y6i
-
-INSERT INTO sys_user (username, password, role, real_name, id_card, phone, email, gender, status) VALUES
-('admin',    '$2a$10$DZyY1hz9uXKjUp4LSXx8UOchNHXGdGutWFtDuGZ5AGXlpx/yi9y6i', 'ADMIN',   '系统管理员', '110101199001011234', '13800000001', 'admin@exam.gov.cn',   '男', 1),
-('teacher',  '$2a$10$DZyY1hz9uXKjUp4LSXx8UOchNHXGdGutWFtDuGZ5AGXlpx/yi9y6i', 'TEACHER', '王老师',     '110101198501012345', '13800000002', 'teacher@exam.gov.cn', '女', 1),
-('student1', '$2a$10$DZyY1hz9uXKjUp4LSXx8UOchNHXGdGutWFtDuGZ5AGXlpx/yi9y6i', 'STUDENT', '张三',       '110101200001011001', '13900000001', 'zhangsan@example.com','男', 1),
-('student2', '$2a$10$DZyY1hz9uXKjUp4LSXx8UOchNHXGdGutWFtDuGZ5AGXlpx/yi9y6i', 'STUDENT', '李四',       '110101200001012002', '13900000002', 'lisi@example.com',    '女', 1),
-('student3', '$2a$10$DZyY1hz9uXKjUp4LSXx8UOchNHXGdGutWFtDuGZ5AGXlpx/yi9y6i', 'STUDENT', '王五',       '110101200001013003', '13900000003', 'wangwu@example.com',  '男', 1);
+-- 注意: sys_user 种子数据已迁移到 UserShardDataSourceConfig，在用户分片初始化时写入
 
 INSERT INTO sys_major (major_code, major_name, level, total_credits, description, status) VALUES
 ('080901', '计算机科学与技术', '本科', 70, '培养计算机软硬件方向的高级人才', 1),

@@ -1,0 +1,330 @@
+package com.exam.shard;
+
+import com.exam.cache.MemoryCacheManager;
+import com.exam.common.PageResult;
+import com.exam.module.user.dto.UserQueryDTO;
+import com.exam.module.user.entity.User;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
+import org.springframework.stereotype.Repository;
+
+import javax.sql.DataSource;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+
+/**
+ * 用户分片仓库
+ * ─────────────────────────────────────────────────────────
+ * 完全替代 UserMapper（MyBatis），所有 sys_user 操作走分片。
+ *
+ * 路由策略（与 ScoreShardRepository 统一）：
+ *   singleShard  → hash(userId) & 7     （精准路由，O(1)）
+ *   fanOut       → 8 分片并行查         （用户名/关键字查找）
+ *
+ * 缓存策略：
+ *   USER_CACHE  → 单用户对象（50K,10min）
+ *   PAGE_CACHE  → 分页结果  （5K, 30s）
+ */
+@Repository
+public class UserShardRepository {
+
+    private static final int    NUM_SHARDS = UserShardDataSourceConfig.NUM_SHARDS;
+    private static final Logger log        = LoggerFactory.getLogger(UserShardRepository.class);
+
+    // ─── SELECT 列（不含 password，用于 API 响应）───────────
+    private static final String COLS =
+            "id,username,role,real_name,id_card,phone,email,gender,avatar,status";
+
+    // ─── RowMapper：无密码（API 响应）────────────────────────
+    private static final RowMapper<User> MAPPER = (rs, i) -> {
+        User u = new User();
+        u.setId(rs.getLong("id"));
+        u.setUsername(rs.getString("username"));
+        u.setRole(rs.getString("role"));
+        u.setRealName(rs.getString("real_name"));
+        u.setIdCard(rs.getString("id_card"));
+        u.setPhone(rs.getString("phone"));
+        u.setEmail(rs.getString("email"));
+        u.setGender(rs.getString("gender"));
+        u.setAvatar(rs.getString("avatar"));
+        u.setStatus(rs.getInt("status"));
+        return u;
+    };
+
+    // ─── RowMapper：含密码（仅用于登录验证）──────────────────
+    private static final RowMapper<User> MAPPER_PWD = (rs, i) -> {
+        User u = new User();
+        u.setId(rs.getLong("id"));
+        u.setUsername(rs.getString("username"));
+        u.setPassword(rs.getString("password"));
+        u.setRole(rs.getString("role"));
+        u.setRealName(rs.getString("real_name"));
+        u.setStatus(rs.getInt("status"));
+        return u;
+    };
+
+    private final JdbcTemplate[]  shards;
+    private final ShardRouter      router;
+    private final MemoryCacheManager cache;
+    private final ExecutorService  pool;
+    private final AtomicLong       nextIdGen;
+
+    @Autowired
+    public UserShardRepository(
+            @Qualifier("userShardDataSources") DataSource[] userShardDataSources,
+            MemoryCacheManager cache) {
+
+        this.shards = new JdbcTemplate[NUM_SHARDS];
+        for (int i = 0; i < NUM_SHARDS; i++) {
+            this.shards[i] = new JdbcTemplate(userShardDataSources[i]);
+        }
+        this.router = new ShardRouter(NUM_SHARDS);
+        this.cache  = cache;
+        this.pool   = new ThreadPoolExecutor(
+                NUM_SHARDS, NUM_SHARDS * 2,
+                60L, TimeUnit.SECONDS,
+                new LinkedBlockingQueue<>(500),
+                r -> { Thread t = new Thread(r, "user-shard"); t.setDaemon(true); return t; });
+
+        // 从各分片的最大 ID 初始化全局序列号
+        // 种子用户 1~5，批量生成用户从 1_000_000 开始
+        // 手动注册用户从 6 开始（避免与两端冲突）
+        long maxId = 5L;
+        for (JdbcTemplate jt : shards) {
+            try {
+                Long m = jt.queryForObject("SELECT MAX(id) FROM sys_user", Long.class);
+                if (m != null && m > maxId) maxId = m;
+            } catch (Exception ignored) {}
+        }
+        // 确保不跑入批量生成用户范围（1_000_000+）
+        long startId = maxId < 6L ? 6L : (maxId < 1_000_000L ? maxId + 1 : maxId + 1);
+        this.nextIdGen = new AtomicLong(startId);
+    }
+
+    // ═══════════════════════════════════════════════════════
+    //  读操作
+    // ═══════════════════════════════════════════════════════
+
+    /** 按 ID 精准查找（单分片，O(1)） */
+    public User findById(long id) {
+        String key = "u:id:" + id;
+        User cached = cache.get(MemoryCacheManager.USER_CACHE, key);
+        if (cached != null) return cached;
+
+        List<User> rows = shards[router.route(id)].query(
+                "SELECT " + COLS + " FROM sys_user WHERE id=? AND deleted=0",
+                MAPPER, id);
+        User u = rows.isEmpty() ? null : rows.get(0);
+        if (u != null) cache.put(MemoryCacheManager.USER_CACHE, key, u);
+        return u;
+    }
+
+    /** 按用户名查找（含密码，用于登录）— fan-out + 缓存 */
+    public User findByUsernameWithPwd(String username) {
+        String key = "u:npwd:" + username;
+        User cached = cache.get(MemoryCacheManager.USER_CACHE, key);
+        if (cached != null) return cached;
+
+        User u = fanOut(username, true);
+        if (u != null) cache.put(MemoryCacheManager.USER_CACHE, key, u);
+        return u;
+    }
+
+    /** 按用户名查找（不含密码，用于成绩导入等） */
+    public User findByUsername(String username) {
+        String key = "u:name:" + username;
+        User cached = cache.get(MemoryCacheManager.USER_CACHE, key);
+        if (cached != null) return cached;
+
+        User u = fanOut(username, false);
+        if (u != null) cache.put(MemoryCacheManager.USER_CACHE, key, u);
+        return u;
+    }
+
+    /** 用户名唯一性检查（fan-out，短路） */
+    public boolean existsByUsername(String username) {
+        String key = "u:exists:" + username;
+        Boolean cached = cache.get(MemoryCacheManager.USER_CACHE, key);
+        if (cached != null) return cached;
+
+        CountDownLatch latch = new CountDownLatch(NUM_SHARDS);
+        AtomicBoolean  found = new AtomicBoolean(false);
+        for (JdbcTemplate jt : shards) {
+            pool.submit(() -> {
+                try {
+                    Integer r = jt.queryForObject(
+                            "SELECT 1 FROM sys_user WHERE username=? AND deleted=0 LIMIT 1",
+                            Integer.class, username);
+                    if (r != null) found.set(true);
+                } catch (Exception ignored) {
+                } finally {
+                    latch.countDown();
+                }
+            });
+        }
+        try { latch.await(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+
+        boolean exists = found.get();
+        cache.put(MemoryCacheManager.USER_CACHE, key, exists);
+        return exists;
+    }
+
+    /**
+     * 分页查询（fan-out 并行 count + 并行 data → 内存合并排序 → 分页）
+     *
+     * 每分片仅取前 page*size 条，总内存占用 = 8 × page × size，
+     * 对管理页面（通常不超过 500 页）完全可接受。
+     */
+    public PageResult<User> page(UserQueryDTO query) {
+        long pageNum  = query.getCurrent() == null ? 1 : query.getCurrent();
+        long pageSize = query.getSize()    == null ? 10 : query.getSize();
+        String role    = query.getRole();
+        Integer status = query.getStatus();
+        String keyword = query.getKeyword();
+        if (keyword != null && keyword.isBlank()) keyword = null;
+
+        String cacheKey = "u:page:" + pageNum + ":" + pageSize + ":"
+                + role + ":" + status + ":" + keyword;
+        PageResult<User> cachedPage = cache.get(MemoryCacheManager.PAGE_CACHE, cacheKey);
+        if (cachedPage != null) return cachedPage;
+
+        // 构造 WHERE
+        StringBuilder sb = new StringBuilder("deleted=0");
+        List<Object>  ps = new ArrayList<>();
+        if (role != null && !role.isBlank()) { sb.append(" AND role=?");   ps.add(role); }
+        if (status != null)                  { sb.append(" AND status=?"); ps.add(status); }
+        if (keyword != null) {
+            sb.append(" AND (username LIKE ? OR real_name LIKE ? OR phone LIKE ?)");
+            String kw = "%" + keyword + "%";
+            ps.add(kw); ps.add(kw); ps.add(kw);
+        }
+        String where = sb.toString();
+        Object[] args = ps.toArray();
+
+        String countSql = "SELECT COUNT(*) FROM sys_user WHERE " + where;
+        int    limit    = (int)(pageNum * pageSize);
+        String dataSql  = "SELECT " + COLS + " FROM sys_user WHERE " + where
+                + " ORDER BY id DESC LIMIT " + limit;
+
+        // 并行执行 count + data
+        List<Future<Long>>       countFutures = new ArrayList<>(NUM_SHARDS);
+        List<Future<List<User>>> dataFutures  = new ArrayList<>(NUM_SHARDS);
+        for (JdbcTemplate jt : shards) {
+            countFutures.add(pool.submit(() -> jt.queryForObject(countSql, Long.class, args)));
+            dataFutures .add(pool.submit(() -> jt.query(dataSql, MAPPER, args)));
+        }
+
+        long total = 0;
+        for (Future<Long> f : countFutures) {
+            try { Long c = f.get(); if (c != null) total += c; }
+            catch (Exception e) { log.error("User shard count error", e); }
+        }
+
+        List<User> all = new ArrayList<>();
+        for (Future<List<User>> f : dataFutures) {
+            try { all.addAll(f.get()); }
+            catch (Exception e) { log.error("User shard data error", e); }
+        }
+
+        // 合并排序
+        all.sort((a, b) -> Long.compare(b.getId(), a.getId()));
+
+        int from    = (int)((pageNum - 1) * pageSize);
+        int to      = (int) Math.min(from + pageSize, all.size());
+        List<User> records = from < all.size()
+                ? new ArrayList<>(all.subList(from, to))
+                : Collections.emptyList();
+
+        PageResult<User> result = PageResult.of(records, total, pageNum, pageSize);
+        cache.put(MemoryCacheManager.PAGE_CACHE, cacheKey, result);
+        return result;
+    }
+
+    // ═══════════════════════════════════════════════════════
+    //  写操作
+    // ═══════════════════════════════════════════════════════
+
+    /** 新增用户（自动分配全局唯一 ID，路由到对应分片） */
+    public void insert(User user) {
+        if (user.getId() == null) {
+            user.setId(nextIdGen.getAndIncrement());
+        }
+        int shard = router.route(user.getId());
+        shards[shard].update(
+                "INSERT INTO sys_user(id,username,password,role,real_name,id_card,phone,email,gender,status)"
+                + " VALUES(?,?,?,?,?,?,?,?,?,?)",
+                user.getId(), user.getUsername(), user.getPassword(), user.getRole(),
+                user.getRealName(), user.getIdCard(), user.getPhone(), user.getEmail(),
+                user.getGender(), user.getStatus() == null ? 1 : user.getStatus());
+        // 清除存在性缓存
+        cache.remove(MemoryCacheManager.USER_CACHE, "u:exists:" + user.getUsername());
+        cache.invalidateAll(MemoryCacheManager.PAGE_CACHE);
+    }
+
+    /** 更新用户信息 */
+    public void update(User user) {
+        int shard = router.route(user.getId());
+        shards[shard].update(
+                "UPDATE sys_user SET role=?,real_name=?,id_card=?,phone=?,email=?,"
+                + "gender=?,status=?,avatar=?,update_time=datetime('now') WHERE id=? AND deleted=0",
+                user.getRole(), user.getRealName(), user.getIdCard(), user.getPhone(),
+                user.getEmail(), user.getGender(), user.getStatus(), user.getAvatar(),
+                user.getId());
+        if (user.getPassword() != null && !user.getPassword().isBlank()) {
+            shards[shard].update(
+                    "UPDATE sys_user SET password=? WHERE id=? AND deleted=0",
+                    user.getPassword(), user.getId());
+        }
+        // 清除缓存
+        cache.remove(MemoryCacheManager.USER_CACHE, "u:id:" + user.getId());
+        cache.invalidateAll(MemoryCacheManager.PAGE_CACHE);
+    }
+
+    /** 软删除 */
+    public void deleteById(long id) {
+        shards[router.route(id)].update(
+                "UPDATE sys_user SET deleted=1 WHERE id=?", id);
+        cache.remove(MemoryCacheManager.USER_CACHE, "u:id:" + id);
+        cache.invalidateAll(MemoryCacheManager.PAGE_CACHE);
+    }
+
+    // ═══════════════════════════════════════════════════════
+    //  内部工具
+    // ═══════════════════════════════════════════════════════
+
+    private User fanOut(String username, boolean withPwd) {
+        String cols = withPwd
+                ? "id,username,password,role,real_name,status"
+                : COLS;
+        String sql = "SELECT " + cols
+                + " FROM sys_user WHERE username=? AND deleted=0 LIMIT 1";
+        RowMapper<User> mapper = withPwd ? MAPPER_PWD : MAPPER;
+
+        List<Future<List<User>>> futures = new ArrayList<>(NUM_SHARDS);
+        for (JdbcTemplate jt : shards) {
+            futures.add(pool.submit(() -> jt.query(sql, mapper, username)));
+        }
+        for (Future<List<User>> f : futures) {
+            try {
+                List<User> r = f.get();
+                if (!r.isEmpty()) return r.get(0);
+            } catch (Exception e) {
+                log.error("User fan-out error for username={}", username, e);
+            }
+        }
+        return null;
+    }
+}

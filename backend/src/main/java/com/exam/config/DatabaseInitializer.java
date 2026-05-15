@@ -95,6 +95,8 @@ public class DatabaseInitializer {
             log.info("[DB Init] 启动后台 2000万数据生成任务...");
             Thread genThread = new Thread(() -> {
                 try {
+                    log.info("===== [DataGen] 开始生成 10万学生账号 =====");
+                    dataGeneratorService.generateUsers();
                     log.info("===== [DataGen] 开始生成 Score 2000万 =====");
                     dataGeneratorService.generateScores();
                     log.info("===== [DataGen] 开始生成 Registration 2000万 =====");
@@ -102,6 +104,7 @@ public class DatabaseInitializer {
                     // 写数据标志文件
                     Files.writeString(Paths.get(MARKER_DATA),
                             "generated at " + java.time.LocalDateTime.now()
+                            + "\nusers="  + dataGeneratorService.userInserted.get()
                             + "\nscores=" + dataGeneratorService.scoreInserted.get()
                             + "\nregs="   + dataGeneratorService.regInserted.get());
                     log.info("===== [DataGen] 全量数据生成完成，标志已写入 =====");

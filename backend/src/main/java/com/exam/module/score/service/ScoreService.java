@@ -16,7 +16,7 @@ import com.exam.module.score.dto.ScoreQueryDTO;
 import com.exam.module.score.entity.Score;
 import com.exam.module.score.mapper.ScoreMapper;
 import com.exam.module.user.entity.User;
-import com.exam.module.user.mapper.UserMapper;
+import com.exam.shard.UserShardRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -32,7 +32,7 @@ public class ScoreService {
     private ScoreMapper scoreMapper;
 
     @Autowired
-    private UserMapper userMapper;
+    private UserShardRepository userRepo;
 
     @Autowired
     private CourseMapper courseMapper;
@@ -134,10 +134,7 @@ public class ScoreService {
             ScoreImportDTO row = rows.get(i);
             try {
                 // 只查 id 列，避免加载全行数据
-                User u = userMapper.selectOne(new LambdaQueryWrapper<User>()
-                        .eq(User::getUsername, row.getUsername())
-                        .select(User::getId)
-                        .last("LIMIT 1"));
+                User u = userRepo.findByUsername(row.getUsername());
                 if (u == null) throw new BizException("用户不存在");
                 Course c = courseMapper.selectOne(new LambdaQueryWrapper<Course>()
                         .eq(Course::getCourseCode, row.getCourseCode())
