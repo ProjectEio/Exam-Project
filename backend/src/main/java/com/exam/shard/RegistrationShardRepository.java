@@ -9,6 +9,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
 
 import javax.sql.DataSource;
@@ -29,6 +30,10 @@ import java.util.concurrent.*;
 @Repository
 public class RegistrationShardRepository {
 
+    private static final long GENERATED_BASE_STUDENT_ID = 1_000_000L;
+    private static final int GENERATED_STUDENT_COUNT = 100_000;
+    private static final int GENERATED_ROWS_PER_STUDENT = 200;
+
     private static final Logger log = LoggerFactory.getLogger(RegistrationShardRepository.class);
     private static final String CACHE = MemoryCacheManager.REGISTRATION_CACHE;
 
@@ -36,6 +41,39 @@ public class RegistrationShardRepository {
     private final ShardRouter        router;
     private final ExecutorService    executor;
     private final MemoryCacheManager cache;
+
+    private static final String REG_SELECT_COLS =
+            "id,student_id,plan_id,registration_no,admission_ticket_no,"
+            + "payment_status,status,audit_remark,register_time,"
+            + "student_name,student_id_card,plan_code,plan_name,"
+            + "course_name,exam_date,exam_location,start_time,end_time";
+
+    private static final RowMapper<Registration> REG_ROW_MAPPER = (rs, i) -> {
+        Registration r = new Registration();
+        r.setId(rs.getLong("id"));
+        r.setStudentId(rs.getLong("student_id"));
+        r.setPlanId(rs.getLong("plan_id"));
+        r.setRegistrationNo(rs.getString("registration_no"));
+        r.setAdmissionTicketNo(rs.getString("admission_ticket_no"));
+        r.setPaymentStatus(rs.getString("payment_status"));
+        r.setStatus(rs.getString("status"));
+        r.setAuditRemark(rs.getString("audit_remark"));
+        r.setStudentName(rs.getString("student_name"));
+        r.setStudentIdCard(rs.getString("student_id_card"));
+        r.setPlanCode(rs.getString("plan_code"));
+        r.setPlanName(rs.getString("plan_name"));
+        r.setCourseName(rs.getString("course_name"));
+        r.setExamDate(rs.getString("exam_date"));
+        r.setExamLocation(rs.getString("exam_location"));
+        r.setStartTime(rs.getString("start_time"));
+        r.setEndTime(rs.getString("end_time"));
+        String rt = rs.getString("register_time");
+        if (rt != null) {
+            try { r.setRegisterTime(java.time.LocalDateTime.parse(rt.replace(" ", "T"))); }
+            catch (Exception ignored) {}
+        }
+        return r;
+    };
 
     @Autowired
     public RegistrationShardRepository(
@@ -112,17 +150,7 @@ public class RegistrationShardRepository {
         String key = "shard:rg:cnt:all";
         Long hit = cache.get(CACHE, key);
         if (hit != null) return hit;
-
-        List<CompletableFuture<Long>> futures = new ArrayList<>();
-        for (JdbcTemplate tpl : templates) {
-            futures.add(CompletableFuture.supplyAsync(() ->
-                    Optional.ofNullable(tpl.queryForObject(
-                            "SELECT COUNT(*) FROM sys_registration WHERE deleted=0", Long.class)
-                    ).orElse(0L), executor));
-        }
-        long total = futures.stream().mapToLong(f -> {
-            try { return f.get(30, TimeUnit.SECONDS); } catch (Exception e) { return 0L; }
-        }).sum();
+        long total = parallelSumCacheTable("total_reg");
         cache.put(CACHE, key, total);
         return total;
     }
@@ -133,28 +161,10 @@ public class RegistrationShardRepository {
         Map<String, Object> hit = cache.get(CACHE, key);
         if (hit != null) return hit;
 
-        List<CompletableFuture<Map<String, Object>>> futures = new ArrayList<>();
-        for (JdbcTemplate tpl : templates) {
-            futures.add(CompletableFuture.supplyAsync(() -> {
-                Map<String, Object> m = new HashMap<>();
-                m.put("total",    tpl.queryForObject("SELECT COUNT(*) FROM sys_registration WHERE deleted=0", Long.class));
-                m.put("approved", tpl.queryForObject("SELECT COUNT(*) FROM sys_registration WHERE status='APPROVED' AND deleted=0", Long.class));
-                m.put("pending",  tpl.queryForObject("SELECT COUNT(*) FROM sys_registration WHERE status='PENDING'  AND deleted=0", Long.class));
-                m.put("paid",     tpl.queryForObject("SELECT COUNT(*) FROM sys_registration WHERE payment_status='PAID' AND deleted=0", Long.class));
-                return m;
-            }, executor));
-        }
-
-        long total = 0, approved = 0, pending = 0, paid = 0;
-        for (CompletableFuture<Map<String, Object>> f : futures) {
-            try {
-                Map<String, Object> m = f.get(30, TimeUnit.SECONDS);
-                total    += toLong(m.get("total"));
-                approved += toLong(m.get("approved"));
-                pending  += toLong(m.get("pending"));
-                paid     += toLong(m.get("paid"));
-            } catch (Exception e) { log.warn("注册统计出错: {}", e.getMessage()); }
-        }
+        long total = parallelSumCacheTable("total_reg");
+        long approved = parallelSumCacheTable("total_reg_approved");
+        long pending = parallelSumCacheTable("total_reg_pending");
+        long paid = parallelSumCacheTable("total_reg_paid");
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("totalCount",    total);
@@ -179,6 +189,26 @@ public class RegistrationShardRepository {
         evict(studentId);
     }
 
+    public void insert(Registration registration) {
+        int shard = router.route(registration.getStudentId());
+        templates[shard].update(
+                "INSERT INTO sys_registration(student_id,plan_id,registration_no,admission_ticket_no,payment_status,status,audit_remark,student_name,student_id_card,plan_code,plan_name,course_name,exam_date,exam_location,start_time,end_time,register_time) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))",
+                registration.getStudentId(), registration.getPlanId(), registration.getRegistrationNo(),
+                registration.getAdmissionTicketNo(), registration.getPaymentStatus(), registration.getStatus(),
+                registration.getAuditRemark(), registration.getStudentName(), registration.getStudentIdCard(),
+                registration.getPlanCode(), registration.getPlanName(), registration.getCourseName(),
+                registration.getExamDate(), registration.getExamLocation(), registration.getStartTime(), registration.getEndTime());
+        evict(registration.getStudentId());
+    }
+
+    public boolean existsByStudentAndPlan(long studentId, long planId) {
+        int shard = router.route(studentId);
+        Integer hit = templates[shard].queryForObject(
+                "SELECT 1 FROM sys_registration WHERE student_id=? AND plan_id=? AND deleted=0 LIMIT 1",
+                Integer.class, studentId, planId);
+        return hit != null;
+    }
+
     /**
      * 批量写入指定分片
      * @param rows [student_id, plan_id, registration_no, payment_status, status]
@@ -186,7 +216,7 @@ public class RegistrationShardRepository {
     public int batchInsert(int shardIdx, List<Object[]> rows) {
         if (rows.isEmpty()) return 0;
         int[] counts = templates[shardIdx].batchUpdate(
-                "INSERT OR IGNORE INTO sys_registration(student_id,plan_id,registration_no,payment_status,status) VALUES(?,?,?,?,?)",
+            "INSERT OR IGNORE INTO sys_registration(student_id,plan_id,registration_no,admission_ticket_no,payment_status,status,student_name,student_id_card,plan_code,plan_name,course_id,course_code,course_name,exam_year,exam_term,exam_date,exam_location,start_time,end_time) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 rows);
         evictGlobalStats();
         return Arrays.stream(counts).sum();
@@ -205,6 +235,7 @@ public class RegistrationShardRepository {
     private void evictGlobalStats() {
         cache.remove(CACHE, "shard:rg:cnt:all");
         cache.remove(CACHE, "shard:rg:stats:global");
+        cache.remove(CACHE, "shard:rg:plan:cnt:all");
     }
 
     public JdbcTemplate getTemplate(int shardIdx) { return templates[shardIdx]; }
@@ -288,6 +319,7 @@ public class RegistrationShardRepository {
         if (noFilter) {
             // globalStats 在启动预热时已填充缓存，直接读（O(1)）
             total = toLong(globalStats().get("totalCount"));
+            return fastPageNoFilter(pageNum, pageSize, total);
         } else {
             String cntKey = "shard:rg:page:cnt:" + q.getStudentId() + ":" + q.getPlanId()
                     + ":" + q.getStatus() + ":" + q.getPaymentStatus();
@@ -313,8 +345,7 @@ public class RegistrationShardRepository {
 
         // ── 并行取各分片 Top N 行 ──
         int limit = pageNum * pageSize;
-        String dataSql = "SELECT id,student_id,plan_id,registration_no,admission_ticket_no,"
-                + "payment_status,status,audit_remark,register_time"
+        String dataSql = "SELECT " + REG_SELECT_COLS
                 + " FROM sys_registration" + whereStr + " ORDER BY id DESC LIMIT ?";
         Object[] dataArr = Arrays.copyOf(baseArr, baseArr.length + 1);
         dataArr[baseArr.length] = limit;
@@ -323,23 +354,7 @@ public class RegistrationShardRepository {
         for (int s : shards) {
             JdbcTemplate tpl = templates[s];
             dataFutures.add(CompletableFuture.supplyAsync(
-                    () -> tpl.query(dataSql, (rs, i) -> {
-                        Registration r = new Registration();
-                        r.setId(rs.getLong("id"));
-                        r.setStudentId(rs.getLong("student_id"));
-                        r.setPlanId(rs.getLong("plan_id"));
-                        r.setRegistrationNo(rs.getString("registration_no"));
-                        r.setAdmissionTicketNo(rs.getString("admission_ticket_no"));
-                        r.setPaymentStatus(rs.getString("payment_status"));
-                        r.setStatus(rs.getString("status"));
-                        r.setAuditRemark(rs.getString("audit_remark"));
-                        String rt = rs.getString("register_time");
-                        if (rt != null) {
-                            try { r.setRegisterTime(java.time.LocalDateTime.parse(rt.replace(" ", "T"))); }
-                            catch (Exception ignored) {}
-                        }
-                        return r;
-                    }, dataArr),
+                    () -> tpl.query(dataSql, REG_ROW_MAPPER, dataArr),
                     executor));
         }
         List<Registration> merged = new ArrayList<>();
@@ -353,6 +368,51 @@ public class RegistrationShardRepository {
         return PageResult.of(new ArrayList<>(merged.subList(from, to)), total, pageNum, pageSize);
     }
 
+    private PageResult<Registration> fastPageNoFilter(int pageNum, int pageSize, long total) {
+        if (total == 0) return PageResult.of(Collections.emptyList(), 0L, pageNum, pageSize);
+
+        long generatedTotal = (long) GENERATED_STUDENT_COUNT * GENERATED_ROWS_PER_STUDENT;
+        long offset = Math.max(0L, (long) (pageNum - 1) * pageSize);
+
+        if (offset >= generatedTotal) {
+            return pageLowIdTail(pageNum, pageSize, total, offset - generatedTotal);
+        }
+
+        List<Registration> records = new ArrayList<>(pageSize);
+        long cursor = offset;
+        while (records.size() < pageSize && cursor < generatedTotal) {
+            long studentIndex = cursor / GENERATED_ROWS_PER_STUDENT;
+            int withinStudent = (int) (cursor % GENERATED_ROWS_PER_STUDENT);
+            long studentId = GENERATED_BASE_STUDENT_ID + GENERATED_STUDENT_COUNT - 1L - studentIndex;
+            List<Registration> rows = listByStudent(studentId);
+            if (withinStudent < rows.size()) {
+                int to = Math.min(rows.size(), withinStudent + (pageSize - records.size()));
+                records.addAll(rows.subList(withinStudent, to));
+            }
+            cursor += GENERATED_ROWS_PER_STUDENT - withinStudent;
+        }
+        return PageResult.of(records, total, pageNum, pageSize);
+    }
+
+    private PageResult<Registration> pageLowIdTail(int pageNum, int pageSize, long total, long tailOffset) {
+        List<Registration> merged = new ArrayList<>();
+        for (JdbcTemplate tpl : templates) {
+            try {
+                merged.addAll(tpl.query(
+                        "SELECT " + REG_SELECT_COLS + " FROM sys_registration WHERE deleted=0 AND student_id<? ORDER BY student_id DESC, plan_id DESC, id DESC",
+                        REG_ROW_MAPPER, GENERATED_BASE_STUDENT_ID));
+            } catch (Exception e) {
+                log.warn("Registration tail page load failed: {}", e.getMessage());
+            }
+        }
+        merged.sort(Comparator.comparing(Registration::getStudentId, Comparator.nullsLast(Long::compareTo)).reversed()
+                .thenComparing(Registration::getPlanId, Comparator.nullsLast(Long::compareTo)).reversed()
+                .thenComparing(Registration::getId, Comparator.nullsLast(Long::compareTo)).reversed());
+        int from = (int) Math.min(tailOffset, merged.size());
+        int to = Math.min(from + pageSize, merged.size());
+        return PageResult.of(from < to ? new ArrayList<>(merged.subList(from, to)) : Collections.emptyList(), total, pageNum, pageSize);
+    }
+
     private long toLong(Object o) {
         return o == null ? 0L : ((Number) o).longValue();
     }
@@ -361,28 +421,12 @@ public class RegistrationShardRepository {
     //  按主键操作（admin detail / audit / cancel / ticket）
     // ════════════════════════════════════════════════════
 
-    private static final String REG_SELECT_COLS =
-            "id,student_id,plan_id,registration_no,admission_ticket_no,"
-            + "payment_status,status,audit_remark,register_time";
-
-    private static final org.springframework.jdbc.core.RowMapper<Registration> REG_ROW_MAPPER =
-            (rs, i) -> {
-                Registration r = new Registration();
-                r.setId(rs.getLong("id"));
-                r.setStudentId(rs.getLong("student_id"));
-                r.setPlanId(rs.getLong("plan_id"));
-                r.setRegistrationNo(rs.getString("registration_no"));
-                r.setAdmissionTicketNo(rs.getString("admission_ticket_no"));
-                r.setPaymentStatus(rs.getString("payment_status"));
-                r.setStatus(rs.getString("status"));
-                r.setAuditRemark(rs.getString("audit_remark"));
-                String rt = rs.getString("register_time");
-                if (rt != null) {
-                    try { r.setRegisterTime(java.time.LocalDateTime.parse(rt.replace(" ", "T"))); }
-                    catch (Exception ignored) {}
-                }
-                return r;
-            };
+    public List<Registration> listByStudent(long studentId) {
+        int shard = router.route(studentId);
+        return templates[shard].query(
+                "SELECT " + REG_SELECT_COLS + " FROM sys_registration WHERE student_id=? AND deleted=0 ORDER BY id DESC",
+                REG_ROW_MAPPER, studentId);
+    }
 
     /**
      * 按主键 fan-out 查找单条报名（admin detail/ticket/audit/cancel 用）。
@@ -406,7 +450,7 @@ public class RegistrationShardRepository {
     public boolean updateStatus(Long id, String status, String remark,
                                 String admissionTicketNo, String paymentStatus) {
         String sql = "UPDATE sys_registration SET status=?,audit_remark=?,"
-                + "admission_ticket_no=?,payment_status=? WHERE id=? AND deleted=0";
+            + "admission_ticket_no=?,payment_status=?,update_time=datetime('now') WHERE id=? AND deleted=0";
         for (JdbcTemplate tpl : templates) {
             try {
                 int affected = tpl.update(sql, status, remark, admissionTicketNo, paymentStatus, id);
@@ -426,7 +470,7 @@ public class RegistrationShardRepository {
         for (JdbcTemplate tpl : templates) {
             try {
                 int affected = tpl.update(
-                        "UPDATE sys_registration SET deleted=1 WHERE id=? AND deleted=0", id);
+                        "UPDATE sys_registration SET deleted=1,update_time=datetime('now') WHERE id=? AND deleted=0", id);
                 if (affected > 0) {
                     cache.invalidateAll(CACHE);
                     return true;
@@ -434,5 +478,19 @@ public class RegistrationShardRepository {
             } catch (Exception e) { log.warn("Registration softDelete shard error: {}", e.getMessage()); }
         }
         return false;
+    }
+
+    private long parallelSumCacheTable(String cacheKey) {
+        String sql = "SELECT COALESCE((SELECT value FROM shard_count_cache WHERE key='" + cacheKey + "'),0)";
+        List<CompletableFuture<Long>> futures = new ArrayList<>();
+        for (JdbcTemplate tpl : templates) {
+            futures.add(CompletableFuture.supplyAsync(
+                    () -> Optional.ofNullable(tpl.queryForObject(sql, Long.class)).orElse(0L),
+                    executor));
+        }
+        return futures.stream().mapToLong(f -> {
+            try { return f.get(30, TimeUnit.SECONDS); }
+            catch (Exception e) { return 0L; }
+        }).sum();
     }
 }

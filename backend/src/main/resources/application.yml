@@ -10,8 +10,8 @@ spring:
   application:
     name: exam-backend
   datasource:
-    # 主库：WAL 模式 + 内存映射 + 缓存优化（数据文件统一放 data/ 目录）
-    url: jdbc:sqlite:data/exam.db?journal_mode=WAL&synchronous=NORMAL&cache_size=20000&temp_store=MEMORY&mmap_size=268435456&busy_timeout=10000
+    # 元数据挂载到 0 号用户分片，彻底移除非分片 exam.db
+    url: jdbc:sqlite:data/exam_user_0.db?journal_mode=WAL&synchronous=NORMAL&cache_size=20000&temp_store=MEMORY&mmap_size=268435456&busy_timeout=10000
     driver-class-name: org.sqlite.JDBC
     username:
     password:
@@ -26,8 +26,8 @@ spring:
   sql:
     init:
       mode: never
-      schema-locations: classpath:db/schema.sql
-      data-locations: classpath:db/data.sql
+      schema-locations: classpath:db/schema-meta.sql
+      data-locations: classpath:db/data-meta.sql
       continue-on-error: true
       encoding: UTF-8
   servlet:

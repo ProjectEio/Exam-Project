@@ -4,7 +4,6 @@ import com.alibaba.excel.EasyExcel;
 import com.alibaba.excel.context.AnalysisContext;
 import com.alibaba.excel.read.listener.ReadListener;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.exam.cache.MemoryCacheManager;
 import com.exam.common.BizException;
 import com.exam.common.PageResult;
@@ -14,7 +13,6 @@ import com.exam.module.course.mapper.CourseMapper;
 import com.exam.module.score.dto.ScoreImportDTO;
 import com.exam.module.score.dto.ScoreQueryDTO;
 import com.exam.module.score.entity.Score;
-import com.exam.module.score.mapper.ScoreMapper;
 import com.exam.module.user.entity.User;
 import com.exam.shard.ScoreShardRepository;
 import com.exam.shard.UserShardRepository;
@@ -25,12 +23,11 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
+import java.util.Map;
 
 @Service
 public class ScoreService {
-
-    @Autowired
-    private ScoreMapper scoreMapper;
 
     @Autowired
     private ScoreShardRepository scoreRepo;
@@ -65,37 +62,48 @@ public class ScoreService {
         List<Score> cached = cacheManager.get(MemoryCacheManager.SCORE_LIST_CACHE, cacheKey);
         if (cached != null) return cached;
 
-        List<Score> list = scoreMapper.listByStudent(uid);
+        List<Score> list = scoreRepo.listByStudent(uid);
         cacheManager.put(MemoryCacheManager.SCORE_LIST_CACHE, cacheKey, list);
         return list;
     }
 
     public Score detail(Long id) {
-        Score s = scoreMapper.selectById(id);
+        Score s = scoreRepo.findById(id);
         if (s == null) throw new BizException("成绩不存在");
         return s;
     }
 
     public void save(Score score) {
         autoStatus(score);
+        fillDisplayFields(score);
         if (score.getId() == null) {
-            // EXISTS + LIMIT 1：走 UNIQUE 索引，O(log n) 而非 COUNT 扫描
-            if (scoreMapper.existsByStudentCourseYearTerm(
+            if (scoreRepo.findByStudentCourseYearTerm(
                     score.getStudentId(), score.getCourseId(),
                     score.getExamYear(), score.getExamTerm()) != null) {
                 throw new BizException("该考生在该学期已存在该科目成绩");
             }
-            scoreMapper.insert(score);
+            scoreRepo.insert(score);
         } else {
-            scoreMapper.updateById(score);
+            Score old = scoreRepo.findById(score.getId());
+            if (old == null) throw new BizException("成绩不存在");
+            if (!Objects.equals(old.getStudentId(), score.getStudentId()) ||
+                    !Objects.equals(old.getCourseId(), score.getCourseId()) ||
+                    !Objects.equals(old.getExamYear(), score.getExamYear()) ||
+                    !Objects.equals(old.getExamTerm(), score.getExamTerm())) {
+                if (scoreRepo.findByStudentCourseYearTerm(
+                        score.getStudentId(), score.getCourseId(), score.getExamYear(), score.getExamTerm()) != null) {
+                    throw new BizException("该考生在该学期已存在该科目成绩");
+                }
+            }
+            scoreRepo.update(score);
         }
         // 写后失效该学生的成绩缓存
         evictStudentScoreCache(score.getStudentId());
     }
 
     public void delete(Long id) {
-        Score s = scoreMapper.selectById(id);
-        scoreMapper.deleteById(id);
+        Score s = scoreRepo.findById(id);
+        if (s != null) scoreRepo.softDeleteById(id);
         if (s != null) evictStudentScoreCache(s.getStudentId());
     }
 
@@ -153,20 +161,9 @@ public class ScoreService {
                 s.setScore(row.getScore());
                 s.setExamDate(row.getExamDate());
                 autoStatus(s);
+                fillDisplayFields(s);
 
-                // 用 EXISTS 判断是否已存在，不走 selectOne 全行查询
-                Integer existFlag = scoreMapper.existsByStudentCourseYearTerm(
-                        s.getStudentId(), s.getCourseId(), s.getExamYear(), s.getExamTerm());
-                if (existFlag != null) {
-                    // 已存在：用 UPDATE WHERE 替代先查后写
-                    scoreMapper.update(s, new LambdaQueryWrapper<Score>()
-                            .eq(Score::getStudentId, s.getStudentId())
-                            .eq(Score::getCourseId, s.getCourseId())
-                            .eq(Score::getExamYear, s.getExamYear())
-                            .eq(Score::getExamTerm, s.getExamTerm()));
-                } else {
-                    scoreMapper.insert(s);
-                }
+                scoreRepo.upsertByUniqueKey(s);
                 result.success++;
             } catch (Exception e) {
                 result.fail++;
@@ -174,6 +171,17 @@ public class ScoreService {
             }
         }
         return result;
+    }
+
+    private void fillDisplayFields(Score score) {
+        if (score == null) return;
+        User user = userRepo.findById(score.getStudentId());
+        if (user == null) throw new BizException("用户不存在");
+        Course course = courseMapper.selectById(score.getCourseId());
+        if (course == null) throw new BizException("课程不存在");
+        score.setStudentName(user.getRealName());
+        score.setCourseCode(course.getCourseCode());
+        score.setCourseName(course.getCourseName());
     }
 
     public static class ImportResult {

@@ -1,10 +1,10 @@
 package com.exam.module.registration.service;
 
 import com.alibaba.excel.EasyExcel;
+import com.exam.common.PageResult;
 import com.exam.module.registration.dto.RegistrationExcelVO;
 import com.exam.module.registration.dto.RegistrationQueryDTO;
 import com.exam.module.registration.entity.Registration;
-import com.exam.module.registration.mapper.RegistrationMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -18,12 +18,13 @@ import java.util.List;
 public class RegistrationExcelService {
 
     @Autowired
-    private RegistrationMapper regMapper;
+    private RegistrationService registrationService;
 
     public void export(RegistrationQueryDTO query, HttpServletResponse response) throws Exception {
-        com.baomidou.mybatisplus.extension.plugins.pagination.Page<Registration> page =
-                new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>(1, 100000);
-        List<Registration> list = regMapper.pageWithJoin(page, query).getRecords();
+        if (query.getCurrent() == null) query.setCurrent(1L);
+        if (query.getSize() == null || query.getSize() < 100000) query.setSize(100000L);
+        PageResult<Registration> page = registrationService.page(query);
+        List<Registration> list = page.getRecords();
 
         List<RegistrationExcelVO> vos = new ArrayList<>(list.size());
         for (Registration r : list) {

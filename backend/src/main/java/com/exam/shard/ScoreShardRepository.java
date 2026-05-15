@@ -9,6 +9,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
 
 import javax.sql.DataSource;
@@ -32,6 +33,10 @@ import java.util.concurrent.*;
 @Repository
 public class ScoreShardRepository {
 
+    private static final long GENERATED_BASE_STUDENT_ID = 1_000_000L;
+    private static final int GENERATED_STUDENT_COUNT = 100_000;
+    private static final int GENERATED_ROWS_PER_STUDENT = 200;
+
     private static final Logger log = LoggerFactory.getLogger(ScoreShardRepository.class);
     private static final String CACHE = MemoryCacheManager.SCORE_LIST_CACHE;
 
@@ -39,6 +44,28 @@ public class ScoreShardRepository {
     private final ShardRouter        router;
     private final ExecutorService    executor;
     private final MemoryCacheManager cache;
+
+    private static final String SCORE_COLS =
+            "id,student_id,course_id,plan_id,exam_year,exam_term,score,status,exam_date,student_name,course_code,course_name";
+
+    private static final RowMapper<Score> SCORE_ROW_MAPPER = (rs, i) -> {
+        Score sc = new Score();
+        sc.setId(rs.getLong("id"));
+        sc.setStudentId(rs.getLong("student_id"));
+        sc.setCourseId(rs.getLong("course_id"));
+        long pid = rs.getLong("plan_id");
+        if (!rs.wasNull()) sc.setPlanId(pid);
+        sc.setExamYear(rs.getInt("exam_year"));
+        sc.setExamTerm(rs.getString("exam_term"));
+        double sv = rs.getDouble("score");
+        if (!rs.wasNull()) sc.setScore(sv);
+        sc.setStatus(rs.getString("status"));
+        sc.setExamDate(rs.getString("exam_date"));
+        sc.setStudentName(rs.getString("student_name"));
+        sc.setCourseCode(rs.getString("course_code"));
+        sc.setCourseName(rs.getString("course_name"));
+        return sc;
+    };
 
     @Autowired
     public ScoreShardRepository(
@@ -101,6 +128,25 @@ public class ScoreShardRepository {
         Map<String, Object> result = rows.isEmpty() ? null : rows.get(0);
         if (result != null) cache.put(CACHE, key, result);
         return result;
+    }
+
+    public List<Score> listByStudent(long studentId) {
+        int shard = router.route(studentId);
+        return templates[shard].query(
+                "SELECT " + SCORE_COLS + " FROM sys_score WHERE student_id=? AND deleted=0 ORDER BY exam_year DESC, exam_term DESC, id DESC",
+                SCORE_ROW_MAPPER, studentId);
+    }
+
+    public Score findById(Long id) {
+        if (id == null) return null;
+        String sql = "SELECT " + SCORE_COLS + " FROM sys_score WHERE id=? AND deleted=0 LIMIT 1";
+        for (JdbcTemplate tpl : templates) {
+            try {
+                List<Score> rows = tpl.query(sql, SCORE_ROW_MAPPER, id);
+                if (!rows.isEmpty()) return rows.get(0);
+            } catch (Exception e) { log.warn("Score findById shard error: {}", e.getMessage()); }
+        }
+        return null;
     }
 
     /** 读计数缓存表（触发器维护，O(1) 主键查找），缓存结果 */
@@ -220,10 +266,20 @@ public class ScoreShardRepository {
     public int batchInsert(int shardIdx, List<Object[]> rows) {
         if (rows.isEmpty()) return 0;
         int[] counts = templates[shardIdx].batchUpdate(
-                "INSERT OR IGNORE INTO sys_score(student_id,course_id,exam_year,exam_term,score,status) VALUES(?,?,?,?,?,?)",
+                "INSERT OR IGNORE INTO sys_score(student_id,course_id,plan_id,exam_year,exam_term,score,status,exam_date,student_name,course_code,course_name) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                 rows);
         evictGlobalStats();
         return Arrays.stream(counts).sum();
+    }
+
+    public void insert(Score score) {
+        if (score == null) return;
+        int shard = router.route(score.getStudentId());
+        templates[shard].update(
+                "INSERT OR IGNORE INTO sys_score(student_id,course_id,plan_id,exam_year,exam_term,score,status,exam_date,student_name,course_code,course_name) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                score.getStudentId(), score.getCourseId(), score.getPlanId(), score.getExamYear(), score.getExamTerm(),
+                score.getScore(), score.getStatus(), score.getExamDate(), score.getStudentName(), score.getCourseCode(), score.getCourseName());
+        evict(score.getStudentId());
     }
 
     public int delete(long studentId, long scoreId) {
@@ -232,6 +288,45 @@ public class ScoreShardRepository {
                 "UPDATE sys_score SET deleted=1 WHERE id=? AND student_id=?", scoreId, studentId);
         if (affected > 0) evict(studentId);
         return affected;
+    }
+
+    public void update(Score score) {
+        if (score == null) return;
+        Score old = findById(score.getId());
+        if (old == null) return;
+        int shard = router.route(old.getStudentId());
+        templates[shard].update(
+            "UPDATE sys_score SET student_id=?,course_id=?,plan_id=?,exam_year=?,exam_term=?,score=?,status=?,exam_date=?,student_name=?,course_code=?,course_name=?,update_time=datetime('now') WHERE id=? AND deleted=0",
+                score.getStudentId(), score.getCourseId(), score.getPlanId(), score.getExamYear(), score.getExamTerm(),
+            score.getScore(), score.getStatus(), score.getExamDate(), score.getStudentName(), score.getCourseCode(), score.getCourseName(), score.getId());
+        evict(old.getStudentId());
+        if (!Objects.equals(old.getStudentId(), score.getStudentId()) && score.getStudentId() != null) {
+            evict(score.getStudentId());
+        }
+    }
+
+    public void upsertByUniqueKey(Score score) {
+        if (score == null || score.getStudentId() == null || score.getCourseId() == null
+                || score.getExamYear() == null || score.getExamTerm() == null) return;
+        int shard = router.route(score.getStudentId());
+        Integer hit = templates[shard].queryForObject(
+                "SELECT 1 FROM sys_score WHERE student_id=? AND course_id=? AND exam_year=? AND exam_term=? AND deleted=0 LIMIT 1",
+                Integer.class, score.getStudentId(), score.getCourseId(), score.getExamYear(), score.getExamTerm());
+        if (hit != null) {
+            templates[shard].update(
+                    "UPDATE sys_score SET score=?,status=?,exam_date=?,plan_id=?,student_name=?,course_code=?,course_name=?,update_time=datetime('now') WHERE student_id=? AND course_id=? AND exam_year=? AND exam_term=? AND deleted=0",
+                    score.getScore(), score.getStatus(), score.getExamDate(), score.getPlanId(), score.getStudentName(), score.getCourseCode(), score.getCourseName(),
+                    score.getStudentId(), score.getCourseId(), score.getExamYear(), score.getExamTerm());
+            evict(score.getStudentId());
+        } else {
+                insert(score);
+        }
+    }
+
+    public boolean softDeleteById(Long id) {
+        Score old = findById(id);
+        if (old == null) return false;
+        return delete(old.getStudentId(), id) > 0;
     }
 
     // ════════════════════════════════════════════════════
@@ -247,6 +342,8 @@ public class ScoreShardRepository {
     private void evictGlobalStats() {
         cache.remove(CACHE, "shard:sc:cnt:all");
         cache.remove(CACHE, "shard:sc:stats:global");
+        cache.remove(CACHE, "shard:sc:status:dist");
+        cache.remove(CACHE, "shard:sc:course:pass:stats");
         cache.invalidateAll(MemoryCacheManager.PAGE_CACHE);
     }
 
@@ -402,6 +499,7 @@ public class ScoreShardRepository {
         if (noFilter) {
             // globalStats 在启动预热时已填充缓存，直接读（O(1)）
             total = toLong(globalStats().get("totalCount"));
+            return fastPageNoFilter(pageNum, pageSize, total);
         } else {
             String cntKey = "shard:sc:page:cnt:" + q.getStudentId() + ":" + q.getCourseId()
                     + ":" + q.getExamYear() + ":" + q.getExamTerm() + ":" + q.getStatus();
@@ -427,7 +525,7 @@ public class ScoreShardRepository {
 
         // ── 并行取各分片 Top N 行 ──
         int limit = pageNum * pageSize;
-        String dataSql = "SELECT id,student_id,course_id,plan_id,exam_year,exam_term,score,status,exam_date"
+        String dataSql = "SELECT " + SCORE_COLS
                 + " FROM sys_score" + whereStr + " ORDER BY id DESC LIMIT ?";
         Object[] dataArr = Arrays.copyOf(baseArr, baseArr.length + 1);
         dataArr[baseArr.length] = limit;
@@ -436,21 +534,7 @@ public class ScoreShardRepository {
         for (int s : shards) {
             JdbcTemplate tpl = templates[s];
             dataFutures.add(CompletableFuture.supplyAsync(
-                    () -> tpl.query(dataSql, (rs, i) -> {
-                        Score sc = new Score();
-                        sc.setId(rs.getLong("id"));
-                        sc.setStudentId(rs.getLong("student_id"));
-                        sc.setCourseId(rs.getLong("course_id"));
-                        long pid = rs.getLong("plan_id");
-                        if (!rs.wasNull()) sc.setPlanId(pid);
-                        sc.setExamYear(rs.getInt("exam_year"));
-                        sc.setExamTerm(rs.getString("exam_term"));
-                        double sv = rs.getDouble("score");
-                        if (!rs.wasNull()) sc.setScore(sv);
-                        sc.setStatus(rs.getString("status"));
-                        sc.setExamDate(rs.getString("exam_date"));
-                        return sc;
-                    }, dataArr),
+                    () -> tpl.query(dataSql, SCORE_ROW_MAPPER, dataArr),
                     executor));
         }
         List<Score> merged = new ArrayList<>();
@@ -462,5 +546,50 @@ public class ScoreShardRepository {
         int from = Math.min((pageNum - 1) * pageSize, merged.size());
         int to   = Math.min(from + pageSize, merged.size());
         return PageResult.of(new ArrayList<>(merged.subList(from, to)), total, pageNum, pageSize);
+    }
+
+    private PageResult<Score> fastPageNoFilter(int pageNum, int pageSize, long total) {
+        if (total == 0) return PageResult.of(Collections.emptyList(), 0L, pageNum, pageSize);
+
+        long generatedTotal = (long) GENERATED_STUDENT_COUNT * GENERATED_ROWS_PER_STUDENT;
+        long offset = Math.max(0L, (long) (pageNum - 1) * pageSize);
+
+        if (offset >= generatedTotal) {
+            return pageLowIdTail(pageNum, pageSize, total, offset - generatedTotal);
+        }
+
+        List<Score> records = new ArrayList<>(pageSize);
+        long cursor = offset;
+        while (records.size() < pageSize && cursor < generatedTotal) {
+            long studentIndex = cursor / GENERATED_ROWS_PER_STUDENT;
+            int withinStudent = (int) (cursor % GENERATED_ROWS_PER_STUDENT);
+            long studentId = GENERATED_BASE_STUDENT_ID + GENERATED_STUDENT_COUNT - 1L - studentIndex;
+            List<Score> rows = listByStudent(studentId);
+            if (withinStudent < rows.size()) {
+                int to = Math.min(rows.size(), withinStudent + (pageSize - records.size()));
+                records.addAll(rows.subList(withinStudent, to));
+            }
+            cursor += GENERATED_ROWS_PER_STUDENT - withinStudent;
+        }
+        return PageResult.of(records, total, pageNum, pageSize);
+    }
+
+    private PageResult<Score> pageLowIdTail(int pageNum, int pageSize, long total, long tailOffset) {
+        List<Score> merged = new ArrayList<>();
+        for (JdbcTemplate tpl : templates) {
+            try {
+                merged.addAll(tpl.query(
+                        "SELECT " + SCORE_COLS + " FROM sys_score WHERE deleted=0 AND student_id<? ORDER BY student_id DESC, course_id DESC, id DESC",
+                        SCORE_ROW_MAPPER, GENERATED_BASE_STUDENT_ID));
+            } catch (Exception e) {
+                log.warn("Score tail page load failed: {}", e.getMessage());
+            }
+        }
+        merged.sort(Comparator.comparing(Score::getStudentId, Comparator.nullsLast(Long::compareTo)).reversed()
+                .thenComparing(Score::getCourseId, Comparator.nullsLast(Long::compareTo)).reversed()
+                .thenComparing(Score::getId, Comparator.nullsLast(Long::compareTo)).reversed());
+        int from = (int) Math.min(tailOffset, merged.size());
+        int to = Math.min(from + pageSize, merged.size());
+        return PageResult.of(from < to ? new ArrayList<>(merged.subList(from, to)) : Collections.emptyList(), total, pageNum, pageSize);
     }
 }

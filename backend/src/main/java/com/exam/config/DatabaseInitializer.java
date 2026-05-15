@@ -17,12 +17,13 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.sql.Connection;
+import java.sql.Statement;
 
 /**
  * 数据库首次初始化器
  * ──────────────────────────────────────────────────────────
  * 策略（双标志文件）：
- *   exam.db.initialized   → schema + seed data 已执行
+ *   exam.meta.initialized → 元数据 schema + seed data 已执行
  *   exam.data.generated   → 2000 万分片数据已生成
  *
  * 删除对应标志文件可触发重新执行对应阶段。
@@ -33,10 +34,22 @@ public class DatabaseInitializer {
     private static final Logger log = LoggerFactory.getLogger(DatabaseInitializer.class);
 
     private static final String DATA_DIR       = "data";
-    private static final String MARKER_SCHEMA  = DATA_DIR + "/exam.db.initialized";
+    private static final String MARKER_SCHEMA  = DATA_DIR + "/exam.meta.initialized";
     private static final String MARKER_DATA    = DATA_DIR + "/exam.data.generated";
 
     private final DataSource dataSource;
+
+    @Autowired
+    @org.springframework.beans.factory.annotation.Qualifier("userShardDataSources")
+    private DataSource[] userShardDataSources;
+
+    @Autowired
+    @org.springframework.beans.factory.annotation.Qualifier("scoreShardDataSources")
+    private DataSource[] scoreShardDataSources;
+
+    @Autowired
+    @org.springframework.beans.factory.annotation.Qualifier("regShardDataSources")
+    private DataSource[] regShardDataSources;
 
     @Lazy
     @Autowired
@@ -61,27 +74,23 @@ public class DatabaseInitializer {
         } else {
             log.info("[DB Init] 首次启动，执行 schema + seed data...");
 
-            // 删除旧 db 文件
+            // 清理旧非分片主库文件
             deleteIfExists(DATA_DIR + "/exam.db");
             deleteIfExists(DATA_DIR + "/exam.db-wal");
             deleteIfExists(DATA_DIR + "/exam.db-shm");
-            for (int i = 0; i < 8; i++) {
-                deleteIfExists(basePath + "exam_score_" + i + ".db");
-                deleteIfExists(basePath + "exam_score_" + i + ".db-wal");
-                deleteIfExists(basePath + "exam_score_" + i + ".db-shm");
-                deleteIfExists(basePath + "exam_reg_"   + i + ".db");
-                deleteIfExists(basePath + "exam_reg_"   + i + ".db-wal");
-                deleteIfExists(basePath + "exam_reg_"   + i + ".db-shm");
-            }
+            resetUserShards();
+            resetScoreShards();
+            resetRegistrationShards();
             // 同时清除数据标志（重建 schema 必须重新生成数据）
             Files.deleteIfExists(Paths.get(MARKER_DATA));
 
             try (Connection conn = dataSource.getConnection()) {
-                log.info("[DB Init] 执行 schema.sql ...");
-                ScriptUtils.executeSqlScript(conn, new ClassPathResource("db/schema.sql"));
-                log.info("[DB Init] 执行 data.sql ...");
-                ScriptUtils.executeSqlScript(conn, new ClassPathResource("db/data.sql"));
+                log.info("[DB Init] 执行 schema-meta.sql ...");
+                ScriptUtils.executeSqlScript(conn, new ClassPathResource("db/schema-meta.sql"));
+                log.info("[DB Init] 执行 data-meta.sql ...");
+                ScriptUtils.executeSqlScript(conn, new ClassPathResource("db/data-meta.sql"));
             }
+            dataGeneratorService.ensureBenchmarkMetadata();
 
             Files.writeString(schemaMarker, "initialized at " + java.time.LocalDateTime.now());
             log.info("[DB Init] schema 初始化完成: {}", schemaMarker.toAbsolutePath());
@@ -122,6 +131,40 @@ public class DatabaseInitializer {
         if (f.exists()) {
             boolean ok = f.delete();
             log.info("[DB Init] 删除旧文件: {} → {}", f.getAbsolutePath(), ok ? "成功" : "失败");
+        }
+    }
+
+    private void resetUserShards() {
+        for (DataSource ds : userShardDataSources) {
+            try (Connection conn = ds.getConnection(); Statement stmt = conn.createStatement()) {
+                stmt.execute("DELETE FROM sys_user WHERE id > 5");
+            } catch (Exception e) {
+                log.warn("[DB Init] 重置 user 分片失败: {}", e.getMessage());
+            }
+        }
+    }
+
+    private void resetScoreShards() {
+        for (DataSource ds : scoreShardDataSources) {
+            try (Connection conn = ds.getConnection(); Statement stmt = conn.createStatement()) {
+                stmt.execute("DELETE FROM sys_score");
+                stmt.execute("DELETE FROM sqlite_sequence WHERE name='sys_score'");
+                stmt.execute("UPDATE shard_count_cache SET value=0 WHERE key IN ('total_score','total_pass')");
+            } catch (Exception e) {
+                log.warn("[DB Init] 重置 score 分片失败: {}", e.getMessage());
+            }
+        }
+    }
+
+    private void resetRegistrationShards() {
+        for (DataSource ds : regShardDataSources) {
+            try (Connection conn = ds.getConnection(); Statement stmt = conn.createStatement()) {
+                stmt.execute("DELETE FROM sys_registration");
+                stmt.execute("DELETE FROM sqlite_sequence WHERE name='sys_registration'");
+                stmt.execute("UPDATE shard_count_cache SET value=0 WHERE key IN ('total_reg','total_reg_approved','total_reg_pending','total_reg_paid')");
+            } catch (Exception e) {
+                log.warn("[DB Init] 重置 reg 分片失败: {}", e.getMessage());
+            }
         }
     }
 }

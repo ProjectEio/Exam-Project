@@ -46,6 +46,7 @@ public class DataGeneratorService {
     private static final int  REGS_PER_STU    = 200;       // 每生200条报名
     private static final int  BATCH_SIZE      = 500;       // 每次批量提交行数
     private static final long BASE_STUDENT_ID = 1_000_000L;// 起始 studentId（避免与真实数据冲突）
+    private static final int  BENCHMARK_DIM   = 200;
 
     private static final String[] STATUSES   = {"PASS", "FAIL", "ABSENT"};
     private static final String[] TERMS      = {"上", "下"};
@@ -59,6 +60,9 @@ public class DataGeneratorService {
     @Autowired
     @Qualifier("userShardDataSources")
     private DataSource[] userShardDataSources;
+
+    @Autowired
+    private DataSource dataSource;
 
     // ── 进度追踪（private + getter，避免 CGLIB 代理字段为 null）────
     private final AtomicLong scoreInserted = new AtomicLong(0);
@@ -74,6 +78,62 @@ public class DataGeneratorService {
     public boolean isRunning()        { return running;             }
     public String  getLastError()     { return lastError;           }
     public long    getStartTimeMs()   { return startTimeMs;         }
+
+    public void ensureBenchmarkMetadata() {
+        JdbcTemplate tpl = new JdbcTemplate(dataSource);
+
+        List<Object[]> courseRows = new ArrayList<>();
+        for (int courseId = 13; courseId <= BENCHMARK_DIM; courseId++) {
+            courseRows.add(new Object[]{
+                    courseId,
+                    benchmarkCourseCode(courseId),
+                    benchmarkCourseName(courseId),
+                    3 + (courseId % 4),
+                    courseId % 3 == 0 ? "公共课" : "专业课",
+                    "性能基准课程 " + courseId
+            });
+        }
+        if (!courseRows.isEmpty()) {
+            tpl.batchUpdate(
+                    "INSERT OR IGNORE INTO sys_course(id,course_code,course_name,credit,course_type,description,deleted) VALUES(?,?,?,?,?,?,0)",
+                    courseRows);
+        }
+
+        List<Object[]> planRows = new ArrayList<>();
+        for (int planId = 7; planId <= BENCHMARK_DIM; planId++) {
+            int examYear = 2024 + ((planId - 1) / 100);
+            String examTerm = TERMS[(planId - 1) % 2];
+            int examMonth = "上".equals(examTerm) ? 4 : 10;
+            int examDay = ((planId - 1) % 28) + 1;
+            String examDate = String.format("%d-%02d-%02d", examYear, examMonth, examDay);
+            int majorId = ((planId - 1) % 4) + 1;
+            String registerStart = String.format("%d-%02d-01", examYear, "上".equals(examTerm) ? 2 : 8);
+            String registerEnd = String.format("%d-%02d-15", examYear, "上".equals(examTerm) ? 3 : 9);
+            planRows.add(new Object[]{
+                    planId,
+                    benchmarkPlanCode(planId, examYear, examTerm),
+                    benchmarkPlanName(planId, examYear, examTerm),
+                    examYear,
+                    examTerm,
+                    planId,
+                    majorId,
+                    examDate,
+                    "上".equals(examTerm) ? "09:00" : "14:30",
+                    "上".equals(examTerm) ? "11:30" : "17:00",
+                    "模拟考点-" + (((planId - 1) % 8) + 1) + "号教室",
+                    200_000,
+                    registerStart,
+                    registerEnd,
+                    "PUBLISHED",
+                    "基准压测计划 " + planId
+            });
+        }
+        if (!planRows.isEmpty()) {
+            tpl.batchUpdate(
+                    "INSERT OR IGNORE INTO sys_exam_plan(id,plan_code,plan_name,exam_year,exam_term,course_id,major_id,exam_date,start_time,end_time,location,capacity,registered_count,register_start,register_end,status,remark,deleted) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?,?,0)",
+                    planRows);
+        }
+    }
 
     // ─────────────────────────────────────────────────────
     //  用户 10 万 生成（主库 sys_user）
@@ -172,8 +232,11 @@ public class DataGeneratorService {
     // ─────────────────────────────────────────────────────
 
     public void generateScores() {
+        ensureBenchmarkMetadata();
         int numShards = ShardDataSourceConfig.NUM_SHARDS;
         ShardRouter router = scoreRepo.getRouter();
+        Map<Long, CourseMeta> courseMap = loadCourseMetaMap();
+        Map<Long, PlanMeta> planMap = loadPlanMetaMap();
         ExecutorService pool = Executors.newFixedThreadPool(numShards);
 
         // 按分片分组学生
@@ -188,7 +251,7 @@ public class DataGeneratorService {
         for (int s = 0; s < numShards; s++) {
             final int shardIdx = s;
             final List<Long> students = shardStudents.get(s);
-            futures.add(pool.submit(() -> generateScoresShard(shardIdx, students)));
+            futures.add(pool.submit(() -> generateScoresShard(shardIdx, students, planMap, courseMap)));
         }
 
         long total = 0;
@@ -199,7 +262,9 @@ public class DataGeneratorService {
         log.info("Score 生成完成，共写入 {} 条", total);
     }
 
-    private long generateScoresShard(int shardIdx, List<Long> students) {
+    private long generateScoresShard(int shardIdx, List<Long> students,
+                                     Map<Long, PlanMeta> planMap,
+                                     Map<Long, CourseMeta> courseMap) {
         JdbcTemplate tpl = scoreRepo.getTemplate(shardIdx);
         long written = 0;
         Random rnd = new Random(shardIdx);
@@ -209,12 +274,40 @@ public class DataGeneratorService {
         tpl.execute("BEGIN");
         try {
             for (long studentId : students) {
-                for (int c = 1; c <= SCORES_PER_STU; c++) {
-                    int year  = 2020 + (c % 5);
-                    String term = TERMS[c % 2];
-                    double score = 40 + rnd.nextInt(61);     // 40~100
-                    String status = score >= 60 ? "PASS" : (score < 10 ? "ABSENT" : "FAIL");
-                    batch.add(new Object[]{studentId, (long) c, year, term, score, status});
+                String studentName = benchmarkStudentName(studentId);
+                for (int planId = 1; planId <= SCORES_PER_STU; planId++) {
+                    PlanMeta plan = planMap.get((long) planId);
+                    if (plan == null) continue;
+                    CourseMeta course = courseMap.get(plan.courseId);
+                    if (course == null) continue;
+
+                    int pick = rnd.nextInt(100);
+                    double score;
+                    String status;
+                    if (pick < 5) {
+                        score = 0.0;
+                        status = "ABSENT";
+                    } else if (pick < 30) {
+                        score = 40 + rnd.nextInt(20);
+                        status = "FAIL";
+                    } else {
+                        score = 60 + rnd.nextInt(41);
+                        status = "PASS";
+                    }
+
+                    batch.add(new Object[]{
+                            studentId,
+                            plan.courseId,
+                            plan.planId,
+                            plan.examYear,
+                            plan.examTerm,
+                            score,
+                            status,
+                            plan.examDate,
+                            studentName,
+                            course.courseCode,
+                            course.courseName
+                    });
 
                     if (batch.size() >= BATCH_SIZE) {
                         scoreRepo.batchInsert(shardIdx, batch);
@@ -250,8 +343,11 @@ public class DataGeneratorService {
     // ─────────────────────────────────────────────────────
 
     public void generateRegistrations() {
+        ensureBenchmarkMetadata();
         int numShards = ShardDataSourceConfig.NUM_SHARDS;
         ShardRouter router = regRepo.getRouter();
+        Map<Long, CourseMeta> courseMap = loadCourseMetaMap();
+        Map<Long, PlanMeta> planMap = loadPlanMetaMap();
         ExecutorService pool = Executors.newFixedThreadPool(numShards);
 
         List<List<Long>> shardStudents = new ArrayList<>();
@@ -265,7 +361,7 @@ public class DataGeneratorService {
         for (int s = 0; s < numShards; s++) {
             final int shardIdx = s;
             final List<Long> students = shardStudents.get(s);
-            futures.add(pool.submit(() -> generateRegShard(shardIdx, students)));
+            futures.add(pool.submit(() -> generateRegShard(shardIdx, students, planMap, courseMap)));
         }
 
         long total = 0;
@@ -273,10 +369,13 @@ public class DataGeneratorService {
             try { total += f.get(); } catch (Exception e) { log.error("Reg 生成出错", e); }
         }
         pool.shutdown();
+        syncRegisteredCount();
         log.info("Registration 生成完成，共写入 {} 条", total);
     }
 
-    private long generateRegShard(int shardIdx, List<Long> students) {
+    private long generateRegShard(int shardIdx, List<Long> students,
+                                  Map<Long, PlanMeta> planMap,
+                                  Map<Long, CourseMeta> courseMap) {
         JdbcTemplate tpl = regRepo.getTemplate(shardIdx);
         long written = 0;
         Random rnd = new Random(shardIdx + 100);
@@ -285,13 +384,40 @@ public class DataGeneratorService {
         tpl.execute("BEGIN");
         try {
             for (long studentId : students) {
+                String studentName = benchmarkStudentName(studentId);
+                String studentIdCard = benchmarkStudentIdCard(studentId);
                 for (int p = 1; p <= REGS_PER_STU; p++) {
                     long planId = (long) p;
+                    PlanMeta plan = planMap.get(planId);
+                    if (plan == null) continue;
+                    CourseMeta course = courseMap.get(plan.courseId);
+                    if (course == null) continue;
                     // 报名编号：shard前缀 + studentId + planId，保证全局唯一
                     String regNo = "R" + shardIdx + "-" + studentId + "-" + planId;
                     String payStatus = PAY_STATUS[rnd.nextInt(2)];
                     String status    = REG_STATUS[rnd.nextInt(3)];
-                    batch.add(new Object[]{studentId, planId, regNo, payStatus, status});
+                    String ticketNo  = "APPROVED".equals(status) ? buildTicketNo(plan, studentId) : null;
+                    batch.add(new Object[]{
+                            studentId,
+                            planId,
+                            regNo,
+                            ticketNo,
+                            payStatus,
+                            status,
+                            studentName,
+                            studentIdCard,
+                            plan.planCode,
+                            plan.planName,
+                            plan.courseId,
+                            course.courseCode,
+                            course.courseName,
+                            plan.examYear,
+                            plan.examTerm,
+                            plan.examDate,
+                            plan.examLocation,
+                            plan.startTime,
+                            plan.endTime
+                    });
 
                     if (batch.size() >= BATCH_SIZE) {
                         regRepo.batchInsert(shardIdx, batch);
@@ -361,5 +487,122 @@ public class DataGeneratorService {
         scoreInserted.set(0);
         regInserted.set(0);
         log.info("所有分片数据已清空");
+    }
+
+    private Map<Long, CourseMeta> loadCourseMetaMap() {
+        JdbcTemplate tpl = new JdbcTemplate(dataSource);
+        Map<Long, CourseMeta> map = new LinkedHashMap<>();
+        tpl.query("SELECT id,course_code,course_name FROM sys_course WHERE deleted=0 AND id<=? ORDER BY id",
+            (org.springframework.jdbc.core.RowCallbackHandler) rs -> map.put(rs.getLong("id"), new CourseMeta(
+                rs.getLong("id"),
+                rs.getString("course_code"),
+                rs.getString("course_name"))),
+                BENCHMARK_DIM);
+        return map;
+    }
+
+    private Map<Long, PlanMeta> loadPlanMetaMap() {
+        JdbcTemplate tpl = new JdbcTemplate(dataSource);
+        Map<Long, PlanMeta> map = new LinkedHashMap<>();
+        tpl.query("SELECT id,plan_code,plan_name,course_id,exam_year,exam_term,exam_date,location,start_time,end_time FROM sys_exam_plan WHERE deleted=0 AND id<=? ORDER BY id",
+            (org.springframework.jdbc.core.RowCallbackHandler) rs -> map.put(rs.getLong("id"), new PlanMeta(
+                rs.getLong("id"),
+                rs.getString("plan_code"),
+                rs.getString("plan_name"),
+                rs.getLong("course_id"),
+                rs.getInt("exam_year"),
+                rs.getString("exam_term"),
+                rs.getString("exam_date"),
+                rs.getString("location"),
+                rs.getString("start_time"),
+                rs.getString("end_time"))),
+                BENCHMARK_DIM);
+        return map;
+    }
+
+    private void syncRegisteredCount() {
+        JdbcTemplate tpl = new JdbcTemplate(dataSource);
+        Map<Long, Long> counts = regRepo.countByPlanId();
+        tpl.update("UPDATE sys_exam_plan SET registered_count=0 WHERE id<=?", BENCHMARK_DIM);
+        List<Object[]> rows = new ArrayList<>();
+        for (Map.Entry<Long, Long> entry : counts.entrySet()) {
+            if (entry.getKey() != null && entry.getKey() <= BENCHMARK_DIM) {
+                rows.add(new Object[]{entry.getValue(), entry.getKey()});
+            }
+        }
+        if (!rows.isEmpty()) {
+            tpl.batchUpdate("UPDATE sys_exam_plan SET registered_count=? WHERE id=?", rows);
+        }
+    }
+
+    private String benchmarkStudentName(long studentId) {
+        return "学生" + studentId;
+    }
+
+    private String benchmarkStudentIdCard(long studentId) {
+        long offset = Math.max(0L, studentId - BASE_STUDENT_ID);
+        return String.format("1101012000%06d%04d", offset % 1_000_000L, offset % 10_000L);
+    }
+
+    private String benchmarkCourseCode(int courseId) {
+        return String.format("SIM%03d", courseId);
+    }
+
+    private String benchmarkCourseName(int courseId) {
+        return String.format("模拟课程%03d", courseId);
+    }
+
+    private String benchmarkPlanCode(int planId, int examYear, String examTerm) {
+        return String.format("PLAN%d%s-%03d", examYear, "上".equals(examTerm) ? "01" : "02", planId);
+    }
+
+    private String benchmarkPlanName(int planId, int examYear, String examTerm) {
+        return String.format("%d%s 模拟考试计划%03d", examYear, examTerm, planId);
+    }
+
+    private String buildTicketNo(PlanMeta plan, long studentId) {
+        return "AT" + plan.examYear + ("上".equals(plan.examTerm) ? "01" : "02")
+                + String.format("%04d", plan.planId)
+                + String.format("%04d", studentId % 10_000);
+    }
+
+    private static final class CourseMeta {
+        private final long courseId;
+        private final String courseCode;
+        private final String courseName;
+
+        private CourseMeta(long courseId, String courseCode, String courseName) {
+            this.courseId = courseId;
+            this.courseCode = courseCode;
+            this.courseName = courseName;
+        }
+    }
+
+    private static final class PlanMeta {
+        private final long planId;
+        private final String planCode;
+        private final String planName;
+        private final long courseId;
+        private final int examYear;
+        private final String examTerm;
+        private final String examDate;
+        private final String examLocation;
+        private final String startTime;
+        private final String endTime;
+
+        private PlanMeta(long planId, String planCode, String planName, long courseId,
+                         int examYear, String examTerm, String examDate,
+                         String examLocation, String startTime, String endTime) {
+            this.planId = planId;
+            this.planCode = planCode;
+            this.planName = planName;
+            this.courseId = courseId;
+            this.examYear = examYear;
+            this.examTerm = examTerm;
+            this.examDate = examDate;
+            this.examLocation = examLocation;
+            this.startTime = startTime;
+            this.endTime = endTime;
+        }
     }
 }

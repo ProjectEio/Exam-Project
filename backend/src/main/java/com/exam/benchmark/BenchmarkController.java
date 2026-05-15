@@ -2,10 +2,20 @@ package com.exam.benchmark;
 
 import com.exam.cache.CacheStats;
 import com.exam.cache.MemoryCacheManager;
+import com.exam.common.PageQuery;
+import com.exam.common.PageResult;
+import com.exam.module.course.service.CourseService;
+import com.exam.module.major.service.MajorService;
+import com.exam.module.plan.dto.PlanQueryDTO;
+import com.exam.module.plan.service.ExamPlanService;
+import com.exam.module.registration.dto.RegistrationQueryDTO;
+import com.exam.module.score.dto.ScoreQueryDTO;
+import com.exam.module.user.dto.UserQueryDTO;
 import com.exam.shard.RegistrationShardRepository;
 import com.exam.shard.ScoreShardRepository;
 import com.exam.shard.ShardDataSourceConfig;
 import com.exam.shard.ShardRouter;
+import com.exam.shard.UserShardRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
@@ -40,7 +50,11 @@ public class BenchmarkController {
     @Autowired private MemoryCacheManager          cacheManager;
     @Autowired private ScoreShardRepository        scoreRepo;
     @Autowired private RegistrationShardRepository regRepo;
+    @Autowired private UserShardRepository         userRepo;
     @Autowired private DataGeneratorService        generator;
+    @Autowired private MajorService                majorService;
+    @Autowired private CourseService               courseService;
+    @Autowired private ExamPlanService             planService;
 
     // ════════════════════════════════════════════
     //  数据生成接口
@@ -282,6 +296,81 @@ public class BenchmarkController {
         r.put("errors",        errors.get());
         r.put("cacheHitRate",  String.format("%.2f%%", 100.0 * cacheHits.get() / totalReqs));
         return r;
+    }
+
+    @GetMapping("/test/page-profile")
+    public Map<String, Object> testPageProfile(@RequestParam(defaultValue = "20") long size) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("size", size);
+        result.put("user", profilePages(userRepo.countAll(), size, current -> {
+            UserQueryDTO q = new UserQueryDTO();
+            q.setCurrent(current);
+            q.setSize(size);
+            return userRepo.page(q);
+        }));
+        result.put("score", profilePages(scoreRepo.countAll(), size, current -> {
+            ScoreQueryDTO q = new ScoreQueryDTO();
+            q.setCurrent(current);
+            q.setSize(size);
+            return scoreRepo.page(q);
+        }));
+        result.put("registration", profilePages(regRepo.countAll(), size, current -> {
+            RegistrationQueryDTO q = new RegistrationQueryDTO();
+            q.setCurrent(current);
+            q.setSize(size);
+            return regRepo.page(q);
+        }));
+        result.put("major", profilePages(totalOf(majorService.page(pageQuery(1L, size))), size, current ->
+                majorService.page(pageQuery(current, size))));
+        result.put("course", profilePages(totalOf(courseService.page(pageQuery(1L, size))), size, current ->
+                courseService.page(pageQuery(current, size))));
+        result.put("plan", profilePages(totalOf(planService.page(planQuery(1L, size))), size, current ->
+                planService.page(planQuery(current, size))));
+        return result;
+    }
+
+    private Map<String, Object> profilePages(long total, long size, java.util.function.LongFunction<PageResult<?>> fetcher) {
+        long totalPages = Math.max(1L, (total + size - 1) / size);
+        long middle = Math.max(1L, (totalPages + 1) / 2);
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("total", total);
+        result.put("pages", totalPages);
+        result.put("first", measurePage(1L, fetcher));
+        result.put("middle", measurePage(middle, fetcher));
+        result.put("last", measurePage(totalPages, fetcher));
+        return result;
+    }
+
+    private Map<String, Object> measurePage(long current, java.util.function.LongFunction<PageResult<?>> fetcher) {
+        long start = System.nanoTime();
+        PageResult<?> page = fetcher.apply(current);
+        long elapsedNs = System.nanoTime() - start;
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("current", current);
+        result.put("records", page.getRecords() == null ? 0 : page.getRecords().size());
+        result.put("total", page.getTotal());
+        result.put("elapsedMs", elapsedNs / 1_000_000.0);
+        return result;
+    }
+
+    private PageQuery pageQuery(Long current, long size) {
+        PageQuery q = new PageQuery();
+        q.setCurrent(current);
+        q.setSize(size);
+        return q;
+    }
+
+    private PlanQueryDTO planQuery(Long current, long size) {
+        PlanQueryDTO q = new PlanQueryDTO();
+        q.setCurrent(current);
+        q.setSize(size);
+        return q;
+    }
+
+    private long totalOf(PageResult<?> page) {
+        return page == null ? 0L : page.getTotal();
     }
 
     // ════════════════════════════════════════════
