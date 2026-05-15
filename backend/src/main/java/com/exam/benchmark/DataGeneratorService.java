@@ -60,13 +60,20 @@ public class DataGeneratorService {
     @Qualifier("userShardDataSources")
     private DataSource[] userShardDataSources;
 
-    // ── 进度追踪 ──────────────────────────────────────────
-    public final AtomicLong scoreInserted = new AtomicLong(0);
-    public final AtomicLong regInserted   = new AtomicLong(0);
-    public final AtomicLong userInserted  = new AtomicLong(0);
-    public volatile boolean running       = false;
-    public volatile String  lastError     = null;
-    public volatile long    startTimeMs   = 0;
+    // ── 进度追踪（private + getter，避免 CGLIB 代理字段为 null）────
+    private final AtomicLong scoreInserted = new AtomicLong(0);
+    private final AtomicLong regInserted   = new AtomicLong(0);
+    private final AtomicLong userInserted  = new AtomicLong(0);
+    private volatile boolean running       = false;
+    private volatile String  lastError     = null;
+    private volatile long    startTimeMs   = 0;
+
+    public long    getScoreInserted() { return scoreInserted.get(); }
+    public long    getRegInserted()   { return regInserted.get();   }
+    public long    getUserInserted()  { return userInserted.get();  }
+    public boolean isRunning()        { return running;             }
+    public String  getLastError()     { return lastError;           }
+    public long    getStartTimeMs()   { return startTimeMs;         }
 
     // ─────────────────────────────────────────────────────
     //  用户 10 万 生成（主库 sys_user）

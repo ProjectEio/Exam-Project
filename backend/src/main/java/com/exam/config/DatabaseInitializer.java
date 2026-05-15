@@ -104,9 +104,9 @@ public class DatabaseInitializer {
                     // 写数据标志文件
                     Files.writeString(Paths.get(MARKER_DATA),
                             "generated at " + java.time.LocalDateTime.now()
-                            + "\nusers="  + dataGeneratorService.userInserted.get()
-                            + "\nscores=" + dataGeneratorService.scoreInserted.get()
-                            + "\nregs="   + dataGeneratorService.regInserted.get());
+                            + "\nusers="  + dataGeneratorService.getUserInserted()
+                            + "\nscores=" + dataGeneratorService.getScoreInserted()
+                            + "\nregs="   + dataGeneratorService.getRegInserted());
                     log.info("===== [DataGen] 全量数据生成完成，标志已写入 =====");
                 } catch (Exception e) {
                     log.error("[DataGen] 数据生成失败", e);

@@ -65,13 +65,13 @@ public class BenchmarkController {
     public Map<String, Object> progress() {
         long scoreTotal = 20_000_000L;
         long regTotal   = 20_000_000L;
-        long scoreNow   = generator.scoreInserted.get();
-        long regNow     = generator.regInserted.get();
-        long elapsed    = generator.startTimeMs > 0
-                ? (System.currentTimeMillis() - generator.startTimeMs) / 1000 : 0;
+        long scoreNow   = generator.getScoreInserted();
+        long regNow     = generator.getRegInserted();
+        long elapsed    = generator.getStartTimeMs() > 0
+                ? (System.currentTimeMillis() - generator.getStartTimeMs()) / 1000 : 0;
 
         Map<String, Object> r = new LinkedHashMap<>();
-        r.put("running",          generator.running);
+        r.put("running",          generator.isRunning());
         r.put("elapsedSeconds",   elapsed);
         r.put("scoreInserted",    scoreNow);
         r.put("scoreTarget",      scoreTotal);
@@ -81,7 +81,7 @@ public class BenchmarkController {
         r.put("regProgress",      String.format("%.2f%%", 100.0 * regNow / regTotal));
         r.put("totalInserted",    scoreNow + regNow);
         r.put("insertRate",       elapsed > 0 ? (scoreNow + regNow) / elapsed + " 条/秒" : "N/A");
-        if (generator.lastError != null) r.put("lastError", generator.lastError);
+        if (generator.getLastError() != null) r.put("lastError", generator.getLastError());
         return r;
     }
 
