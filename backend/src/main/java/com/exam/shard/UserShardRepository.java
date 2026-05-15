@@ -327,4 +327,38 @@ public class UserShardRepository {
         }
         return null;
     }
+
+    // ═══════════════════════════════════════════════════════
+    //  统计接口（替代主库 StatisticsMapper）
+    // ═══════════════════════════════════════════════════════
+
+    /** 统计所有未删除用户总数（fan-out 8 分片求和） */
+    public long countAll() {
+        List<Future<Long>> futures = new ArrayList<>(NUM_SHARDS);
+        for (JdbcTemplate jt : shards) {
+            futures.add(pool.submit(() ->
+                jt.queryForObject("SELECT COUNT(*) FROM sys_user WHERE deleted=0", Long.class)));
+        }
+        long total = 0;
+        for (Future<Long> f : futures) {
+            try { Long c = f.get(); if (c != null) total += c; }
+            catch (Exception e) { log.error("User countAll shard error", e); }
+        }
+        return total;
+    }
+
+    /** 统计指定角色的用户数（fan-out 8 分片求和） */
+    public long countByRole(String role) {
+        List<Future<Long>> futures = new ArrayList<>(NUM_SHARDS);
+        for (JdbcTemplate jt : shards) {
+            futures.add(pool.submit(() ->
+                jt.queryForObject("SELECT COUNT(*) FROM sys_user WHERE deleted=0 AND role=?", Long.class, role)));
+        }
+        long total = 0;
+        for (Future<Long> f : futures) {
+            try { Long c = f.get(); if (c != null) total += c; }
+            catch (Exception e) { log.error("User countByRole shard error", e); }
+        }
+        return total;
+    }
 }
