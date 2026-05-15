@@ -490,6 +490,10 @@ public class ScoreShardRepository {
                 && q.getExamYear() == null
                 && (q.getExamTerm() == null || q.getExamTerm().isEmpty())
                 && (q.getStatus() == null || q.getStatus().isEmpty()));
+        boolean passOnly = (q.getStudentId() == null && q.getCourseId() == null
+            && q.getExamYear() == null
+            && (q.getExamTerm() == null || q.getExamTerm().isEmpty())
+            && "PASS".equals(q.getStatus()));
         int[] shards = (q.getStudentId() != null)
                 ? new int[]{ router.route(q.getStudentId()) }
                 : new int[]{0,1,2,3,4,5,6,7};
@@ -500,6 +504,8 @@ public class ScoreShardRepository {
             // globalStats 在启动预热时已填充缓存，直接读（O(1)）
             total = toLong(globalStats().get("totalCount"));
             return fastPageNoFilter(pageNum, pageSize, total);
+        } else if (passOnly) {
+            total = toLong(globalStats().get("passCount"));
         } else {
             String cntKey = "shard:sc:page:cnt:" + q.getStudentId() + ":" + q.getCourseId()
                     + ":" + q.getExamYear() + ":" + q.getExamTerm() + ":" + q.getStatus();
@@ -522,6 +528,9 @@ public class ScoreShardRepository {
             }
         }
         if (total == 0) return PageResult.of(Collections.emptyList(), 0L, pageNum, pageSize);
+        if ((long) (pageNum - 1) * pageSize >= total) {
+            return PageResult.of(Collections.emptyList(), total, pageNum, pageSize);
+        }
 
         // ── 并行取各分片 Top N 行 ──
         int limit = pageNum * pageSize;

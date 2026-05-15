@@ -310,6 +310,12 @@ public class RegistrationShardRepository {
         boolean noFilter = (q.getStudentId() == null && q.getPlanId() == null
                 && (q.getStatus() == null || q.getStatus().isEmpty())
                 && (q.getPaymentStatus() == null || q.getPaymentStatus().isEmpty()));
+        boolean statusOnly = (q.getStudentId() == null && q.getPlanId() == null
+            && q.getStatus() != null && !q.getStatus().isEmpty()
+            && (q.getPaymentStatus() == null || q.getPaymentStatus().isEmpty()));
+        boolean paymentOnly = (q.getStudentId() == null && q.getPlanId() == null
+            && (q.getStatus() == null || q.getStatus().isEmpty())
+            && q.getPaymentStatus() != null && !q.getPaymentStatus().isEmpty());
         int[] shards = (q.getStudentId() != null)
                 ? new int[]{ router.route(q.getStudentId()) }
                 : new int[]{0,1,2,3,4,5,6,7};
@@ -320,6 +326,37 @@ public class RegistrationShardRepository {
             // globalStats 在启动预热时已填充缓存，直接读（O(1)）
             total = toLong(globalStats().get("totalCount"));
             return fastPageNoFilter(pageNum, pageSize, total);
+        } else if (statusOnly) {
+            total = switch (q.getStatus()) {
+            case "APPROVED" -> parallelSumCacheTable("total_reg_approved");
+            case "PENDING" -> parallelSumCacheTable("total_reg_pending");
+            case "REJECTED" -> Math.max(0L,
+                parallelSumCacheTable("total_reg")
+                    - parallelSumCacheTable("total_reg_approved")
+                    - parallelSumCacheTable("total_reg_pending"));
+            default -> -1L;
+            };
+            if (total >= 0) {
+            String cntKey = "shard:rg:page:cnt:" + q.getStudentId() + ":" + q.getPlanId()
+                + ":" + q.getStatus() + ":" + q.getPaymentStatus();
+            cache.put(CACHE, cntKey, total);
+            } else {
+                total = countWithQuery(shards, whereStr, baseArr);
+            }
+        } else if (paymentOnly) {
+            total = switch (q.getPaymentStatus()) {
+            case "PAID" -> parallelSumCacheTable("total_reg_paid");
+            case "UNPAID" -> Math.max(0L,
+                parallelSumCacheTable("total_reg") - parallelSumCacheTable("total_reg_paid"));
+            default -> -1L;
+            };
+            if (total >= 0) {
+            String cntKey = "shard:rg:page:cnt:" + q.getStudentId() + ":" + q.getPlanId()
+                + ":" + q.getStatus() + ":" + q.getPaymentStatus();
+            cache.put(CACHE, cntKey, total);
+            } else {
+                total = countWithQuery(shards, whereStr, baseArr);
+            }
         } else {
             String cntKey = "shard:rg:page:cnt:" + q.getStudentId() + ":" + q.getPlanId()
                     + ":" + q.getStatus() + ":" + q.getPaymentStatus();
@@ -342,6 +379,9 @@ public class RegistrationShardRepository {
             }
         }
         if (total == 0) return PageResult.of(Collections.emptyList(), 0L, pageNum, pageSize);
+        if ((long) (pageNum - 1) * pageSize >= total) {
+            return PageResult.of(Collections.emptyList(), total, pageNum, pageSize);
+        }
 
         // ── 并行取各分片 Top N 行 ──
         int limit = pageNum * pageSize;
@@ -489,6 +529,21 @@ public class RegistrationShardRepository {
                     executor));
         }
         return futures.stream().mapToLong(f -> {
+            try { return f.get(30, TimeUnit.SECONDS); }
+            catch (Exception e) { return 0L; }
+        }).sum();
+    }
+
+    private long countWithQuery(int[] shards, String whereStr, Object[] baseArr) {
+        String countSql = "SELECT COUNT(*) FROM sys_registration" + whereStr;
+        List<CompletableFuture<Long>> cntFutures = new ArrayList<>();
+        for (int s : shards) {
+            JdbcTemplate tpl = templates[s];
+            cntFutures.add(CompletableFuture.supplyAsync(
+                    () -> Optional.ofNullable(tpl.queryForObject(countSql, Long.class, baseArr)).orElse(0L),
+                    executor));
+        }
+        return cntFutures.stream().mapToLong(f -> {
             try { return f.get(30, TimeUnit.SECONDS); }
             catch (Exception e) { return 0L; }
         }).sum();

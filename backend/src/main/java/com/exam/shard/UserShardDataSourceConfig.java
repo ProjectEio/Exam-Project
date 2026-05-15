@@ -123,6 +123,62 @@ public class UserShardDataSourceConfig {
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_usr_role   ON sys_user(role,    deleted)");
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_usr_status ON sys_user(status,  deleted)");
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_usr_name   ON sys_user(real_name, deleted)");
+                        stmt.execute("""
+                                CREATE TABLE IF NOT EXISTS user_count_cache (
+                                        key   TEXT PRIMARY KEY,
+                                        value INTEGER NOT NULL DEFAULT 0
+                                )
+                                """);
+                        stmt.execute("INSERT OR IGNORE INTO user_count_cache(key,value) VALUES('total_user',0)");
+                        stmt.execute("INSERT OR IGNORE INTO user_count_cache(key,value) VALUES('role_admin',0)");
+                        stmt.execute("INSERT OR IGNORE INTO user_count_cache(key,value) VALUES('role_teacher',0)");
+                        stmt.execute("INSERT OR IGNORE INTO user_count_cache(key,value) VALUES('role_student',0)");
+                        stmt.execute("""
+                                CREATE TRIGGER IF NOT EXISTS trg_user_ins
+                                AFTER INSERT ON sys_user
+                                WHEN NEW.deleted=0
+                                BEGIN
+                                    UPDATE user_count_cache SET value=value+1 WHERE key='total_user';
+                                    UPDATE user_count_cache SET value=value+1 WHERE key='role_admin'   AND NEW.role='ADMIN';
+                                    UPDATE user_count_cache SET value=value+1 WHERE key='role_teacher' AND NEW.role='TEACHER';
+                                    UPDATE user_count_cache SET value=value+1 WHERE key='role_student' AND NEW.role='STUDENT';
+                                END
+                                """);
+                        stmt.execute("""
+                                CREATE TRIGGER IF NOT EXISTS trg_user_soft_delete
+                                AFTER UPDATE OF deleted ON sys_user
+                                WHEN NEW.deleted=1 AND OLD.deleted=0
+                                BEGIN
+                                    UPDATE user_count_cache SET value=MAX(0,value-1) WHERE key='total_user';
+                                    UPDATE user_count_cache SET value=MAX(0,value-1) WHERE key='role_admin'   AND OLD.role='ADMIN';
+                                    UPDATE user_count_cache SET value=MAX(0,value-1) WHERE key='role_teacher' AND OLD.role='TEACHER';
+                                    UPDATE user_count_cache SET value=MAX(0,value-1) WHERE key='role_student' AND OLD.role='STUDENT';
+                                END
+                                """);
+                        stmt.execute("""
+                                CREATE TRIGGER IF NOT EXISTS trg_user_restore
+                                AFTER UPDATE OF deleted ON sys_user
+                                WHEN NEW.deleted=0 AND OLD.deleted=1
+                                BEGIN
+                                    UPDATE user_count_cache SET value=value+1 WHERE key='total_user';
+                                    UPDATE user_count_cache SET value=value+1 WHERE key='role_admin'   AND NEW.role='ADMIN';
+                                    UPDATE user_count_cache SET value=value+1 WHERE key='role_teacher' AND NEW.role='TEACHER';
+                                    UPDATE user_count_cache SET value=value+1 WHERE key='role_student' AND NEW.role='STUDENT';
+                                END
+                                """);
+                        stmt.execute("""
+                                CREATE TRIGGER IF NOT EXISTS trg_user_role_change
+                                AFTER UPDATE OF role ON sys_user
+                                WHEN NEW.deleted=0 AND OLD.deleted=0 AND NEW.role<>OLD.role
+                                BEGIN
+                                    UPDATE user_count_cache SET value=MAX(0,value-1) WHERE key='role_admin'   AND OLD.role='ADMIN';
+                                    UPDATE user_count_cache SET value=MAX(0,value-1) WHERE key='role_teacher' AND OLD.role='TEACHER';
+                                    UPDATE user_count_cache SET value=MAX(0,value-1) WHERE key='role_student' AND OLD.role='STUDENT';
+                                    UPDATE user_count_cache SET value=value+1 WHERE key='role_admin'   AND NEW.role='ADMIN';
+                                    UPDATE user_count_cache SET value=value+1 WHERE key='role_teacher' AND NEW.role='TEACHER';
+                                    UPDATE user_count_cache SET value=value+1 WHERE key='role_student' AND NEW.role='STUDENT';
+                                END
+                                """);
 
             // 插入属于本分片的种子用户
             String sql = "INSERT OR IGNORE INTO sys_user"
@@ -144,6 +200,10 @@ public class UserShardDataSourceConfig {
                     }
                 }
             }
+            stmt.execute("UPDATE user_count_cache SET value=(SELECT COUNT(*) FROM sys_user WHERE deleted=0) WHERE key='total_user'");
+            stmt.execute("UPDATE user_count_cache SET value=(SELECT COUNT(*) FROM sys_user WHERE deleted=0 AND role='ADMIN') WHERE key='role_admin'");
+            stmt.execute("UPDATE user_count_cache SET value=(SELECT COUNT(*) FROM sys_user WHERE deleted=0 AND role='TEACHER') WHERE key='role_teacher'");
+            stmt.execute("UPDATE user_count_cache SET value=(SELECT COUNT(*) FROM sys_user WHERE deleted=0 AND role='STUDENT') WHERE key='role_student'");
             log.info("User 分片 [{}] schema 就绪", shardIdx);
         } catch (SQLException e) {
             throw new RuntimeException("User shard[" + shardIdx + "] 初始化失败", e);

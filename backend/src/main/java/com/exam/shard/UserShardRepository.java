@@ -43,6 +43,9 @@ public class UserShardRepository {
 
     private static final int    NUM_SHARDS = UserShardDataSourceConfig.NUM_SHARDS;
     private static final Logger log        = LoggerFactory.getLogger(UserShardRepository.class);
+    private static final long   GENERATED_BASE_STUDENT_ID = 1_000_000L;
+    private static final int    GENERATED_STUDENT_COUNT   = 100_000;
+    private static final long   GENERATED_MAX_STUDENT_ID  = GENERATED_BASE_STUDENT_ID + GENERATED_STUDENT_COUNT - 1;
 
     // ─── SELECT 列（不含 password，用于 API 响应）───────────
     private static final String COLS =
@@ -214,6 +217,17 @@ public class UserShardRepository {
         String where = sb.toString();
         Object[] args = ps.toArray();
 
+        boolean roleBlank = role == null || role.isBlank();
+        boolean studentOnly = "STUDENT".equals(role);
+        boolean fastPath = keyword == null && status == null && (roleBlank || studentOnly);
+
+        if (fastPath) {
+            long total = roleBlank ? countAll() : countByRole(role);
+            PageResult<User> result = fastPage(pageNum, pageSize, total, studentOnly);
+            cache.put(MemoryCacheManager.PAGE_CACHE, cacheKey, result);
+            return result;
+        }
+
         boolean noKeyword = keyword == null;
         int    limit    = (int)(pageNum * pageSize);
         String dataSql  = "SELECT " + COLS + " FROM sys_user WHERE " + where
@@ -261,6 +275,121 @@ public class UserShardRepository {
         PageResult<User> result = PageResult.of(records, total, pageNum, pageSize);
         cache.put(MemoryCacheManager.PAGE_CACHE, cacheKey, result);
         return result;
+    }
+
+    private PageResult<User> fastPage(long pageNum, long pageSize, long total, boolean studentOnly) {
+        if (total == 0) return PageResult.of(Collections.emptyList(), 0L, pageNum, pageSize);
+
+        long offset = Math.max(0L, (pageNum - 1) * pageSize);
+        if (offset >= total) return PageResult.of(Collections.emptyList(), total, pageNum, pageSize);
+
+        List<User> highUsers = loadSpecialUsers(true, studentOnly);
+        List<User> lowUsers = loadSpecialUsers(false, studentOnly);
+        List<User> records = new ArrayList<>((int) pageSize);
+        long remainingOffset = offset;
+
+        if (remainingOffset < highUsers.size()) {
+            int from = (int) remainingOffset;
+            int to = (int) Math.min(highUsers.size(), from + pageSize);
+            records.addAll(highUsers.subList(from, to));
+            remainingOffset = 0;
+        } else {
+            remainingOffset -= highUsers.size();
+        }
+
+        if (records.size() < pageSize) {
+            if (remainingOffset < GENERATED_STUDENT_COUNT) {
+                long generatedIndex = remainingOffset;
+                while (records.size() < pageSize && generatedIndex < GENERATED_STUDENT_COUNT) {
+                    int need = (int) (pageSize - records.size());
+                    List<Long> ids = new ArrayList<>(need);
+                    while (ids.size() < need && generatedIndex < GENERATED_STUDENT_COUNT) {
+                        ids.add(GENERATED_MAX_STUDENT_ID - generatedIndex);
+                        generatedIndex++;
+                    }
+                    List<User> batch = loadUsersByIdsDescending(ids);
+                    if (batch.isEmpty()) break;
+                    records.addAll(batch);
+                }
+                remainingOffset = 0;
+            } else {
+                remainingOffset -= GENERATED_STUDENT_COUNT;
+            }
+        }
+
+        if (records.size() < pageSize && remainingOffset < lowUsers.size()) {
+            int from = (int) remainingOffset;
+            int to = (int) Math.min(lowUsers.size(), from + (pageSize - records.size()));
+            records.addAll(lowUsers.subList(from, to));
+        }
+
+        return PageResult.of(records, total, pageNum, pageSize);
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<User> loadSpecialUsers(boolean highRange, boolean studentOnly) {
+        String key = "u:special:" + (highRange ? "high" : "low") + ":" + (studentOnly ? "student" : "all");
+        List<User> cached = cache.get(MemoryCacheManager.USER_CACHE, key);
+        if (cached != null) return cached;
+
+        StringBuilder sql = new StringBuilder("SELECT " + COLS + " FROM sys_user WHERE deleted=0 ");
+        List<Object> args = new ArrayList<>();
+        if (highRange) {
+            sql.append("AND id>? ");
+            args.add(GENERATED_MAX_STUDENT_ID);
+        } else {
+            sql.append("AND id<? ");
+            args.add(GENERATED_BASE_STUDENT_ID);
+        }
+        if (studentOnly) {
+            sql.append("AND role=? ");
+            args.add("STUDENT");
+        }
+        sql.append("ORDER BY id DESC");
+
+        List<Future<List<User>>> futures = new ArrayList<>(NUM_SHARDS);
+        Object[] params = args.toArray();
+        for (JdbcTemplate jt : shards) {
+            futures.add(pool.submit(() -> jt.query(sql.toString(), MAPPER, params)));
+        }
+
+        List<User> all = new ArrayList<>();
+        for (Future<List<User>> f : futures) {
+            try { all.addAll(f.get()); }
+            catch (Exception e) { log.error("User special page query error", e); }
+        }
+        all.sort((a, b) -> Long.compare(b.getId(), a.getId()));
+        cache.put(MemoryCacheManager.USER_CACHE, key, all);
+        return all;
+    }
+
+    private List<User> loadUsersByIdsDescending(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) return Collections.emptyList();
+
+        java.util.Map<Integer, List<Long>> byShard = new java.util.LinkedHashMap<>();
+        for (Long id : ids) {
+            byShard.computeIfAbsent(router.route(id), k -> new ArrayList<>()).add(id);
+        }
+
+        List<Future<List<User>>> futures = new ArrayList<>(byShard.size());
+        for (java.util.Map.Entry<Integer, List<Long>> entry : byShard.entrySet()) {
+            int shard = entry.getKey();
+            List<Long> shardIds = entry.getValue();
+            futures.add(pool.submit(() -> {
+                String placeholders = String.join(",", java.util.Collections.nCopies(shardIds.size(), "?"));
+                String sql = "SELECT " + COLS + " FROM sys_user WHERE deleted=0 AND id IN (" + placeholders + ")";
+                Object[] params = shardIds.toArray();
+                return shards[shard].query(sql, MAPPER, params);
+            }));
+        }
+
+        List<User> users = new ArrayList<>(ids.size());
+        for (Future<List<User>> f : futures) {
+            try { users.addAll(f.get()); }
+            catch (Exception e) { log.error("User id batch load error", e); }
+        }
+        users.sort((a, b) -> Long.compare(b.getId(), a.getId()));
+        return users;
     }
 
     // ═══════════════════════════════════════════════════════
@@ -319,6 +448,10 @@ public class UserShardRepository {
         for (String role : List.of("ADMIN", "TEACHER", "STUDENT")) {
             cache.remove(MemoryCacheManager.USER_CACHE, "u:cnt:role:" + role);
         }
+        cache.remove(MemoryCacheManager.USER_CACHE, "u:special:high:all");
+        cache.remove(MemoryCacheManager.USER_CACHE, "u:special:low:all");
+        cache.remove(MemoryCacheManager.USER_CACHE, "u:special:high:student");
+        cache.remove(MemoryCacheManager.USER_CACHE, "u:special:low:student");
     }
 
     // ═══════════════════════════════════════════════════════
@@ -357,17 +490,7 @@ public class UserShardRepository {
         String key = "u:cnt:all";
         Long hit = cache.get(MemoryCacheManager.USER_CACHE, key);
         if (hit != null) return hit;
-
-        List<Future<Long>> futures = new ArrayList<>(NUM_SHARDS);
-        for (JdbcTemplate jt : shards) {
-            futures.add(pool.submit(() ->
-                jt.queryForObject("SELECT COUNT(*) FROM sys_user WHERE deleted=0", Long.class)));
-        }
-        long total = 0;
-        for (Future<Long> f : futures) {
-            try { Long c = f.get(); if (c != null) total += c; }
-            catch (Exception e) { log.error("User countAll shard error", e); }
-        }
+        long total = parallelSumCacheTable("total_user");
         cache.put(MemoryCacheManager.USER_CACHE, key, total);
         return total;
     }
@@ -377,18 +500,42 @@ public class UserShardRepository {
         String key = "u:cnt:role:" + role;
         Long hit = cache.get(MemoryCacheManager.USER_CACHE, key);
         if (hit != null) return hit;
+        String cacheKey = switch (role) {
+            case "ADMIN" -> "role_admin";
+            case "TEACHER" -> "role_teacher";
+            case "STUDENT" -> "role_student";
+            default -> null;
+        };
+        long total;
+        if (cacheKey != null) {
+            total = parallelSumCacheTable(cacheKey);
+        } else {
+            List<Future<Long>> futures = new ArrayList<>(NUM_SHARDS);
+            for (JdbcTemplate jt : shards) {
+                futures.add(pool.submit(() ->
+                    jt.queryForObject("SELECT COUNT(*) FROM sys_user WHERE deleted=0 AND role=?", Long.class, role)));
+            }
+            total = 0;
+            for (Future<Long> f : futures) {
+                try { Long c = f.get(); if (c != null) total += c; }
+                catch (Exception e) { log.error("User countByRole shard error", e); }
+            }
+        }
+        cache.put(MemoryCacheManager.USER_CACHE, key, total);
+        return total;
+    }
 
+    private long parallelSumCacheTable(String cacheKey) {
         List<Future<Long>> futures = new ArrayList<>(NUM_SHARDS);
         for (JdbcTemplate jt : shards) {
             futures.add(pool.submit(() ->
-                jt.queryForObject("SELECT COUNT(*) FROM sys_user WHERE deleted=0 AND role=?", Long.class, role)));
+                    jt.queryForObject("SELECT COALESCE((SELECT value FROM user_count_cache WHERE key=?),0)", Long.class, cacheKey)));
         }
         long total = 0;
         for (Future<Long> f : futures) {
             try { Long c = f.get(); if (c != null) total += c; }
-            catch (Exception e) { log.error("User countByRole shard error", e); }
+            catch (Exception e) { log.error("User count cache read error", e); }
         }
-        cache.put(MemoryCacheManager.USER_CACHE, key, total);
         return total;
     }
 }
