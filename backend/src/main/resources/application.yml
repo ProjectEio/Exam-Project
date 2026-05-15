@@ -51,7 +51,7 @@ mybatis-plus:
   type-aliases-package: com.exam.module.*.entity
   configuration:
     map-underscore-to-camel-case: true
-    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+    log-impl: org.apache.ibatis.logging.nologging.NoLoggingImpl
     cache-enabled: false
   global-config:
     banner: false
@@ -95,5 +95,6 @@ springdoc:
 logging:
   level:
     root: INFO
-    com.exam: DEBUG
-    org.springframework.jdbc.datasource.init: DEBUG
+    com.exam: INFO
+    org.apache.ibatis: WARN
+    org.springframework.jdbc.datasource.init: WARN

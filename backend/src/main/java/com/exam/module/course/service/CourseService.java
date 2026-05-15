@@ -2,6 +2,7 @@ package com.exam.module.course.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.exam.cache.MemoryCacheManager;
 import com.exam.common.BizException;
 import com.exam.common.PageQuery;
 import com.exam.common.PageResult;
@@ -19,13 +20,24 @@ import java.util.List;
 @Service
 public class CourseService {
 
+    private static final String PAGE_KEY_PREFIX = "course:page:";
+    private static final String ALL_KEY = "course:all";
+    private static final String BY_MAJOR_KEY_PREFIX = "course:major:";
+
     @Autowired
     private CourseMapper courseMapper;
 
     @Autowired
     private MajorCourseMapper majorCourseMapper;
 
+    @Autowired
+    private MemoryCacheManager cacheManager;
+
     public PageResult<Course> page(PageQuery query) {
+        String cacheKey = PAGE_KEY_PREFIX + query.getCurrent() + ":" + query.getSize() + ":" + query.getKeyword();
+        PageResult<Course> hit = cacheManager.get(MemoryCacheManager.PAGE_CACHE, cacheKey);
+        if (hit != null) return hit;
+
         Page<Course> page = new Page<>(query.getCurrent(), query.getSize());
         LambdaQueryWrapper<Course> w = new LambdaQueryWrapper<>();
         if (StringUtils.hasText(query.getKeyword())) {
@@ -33,15 +45,26 @@ public class CourseService {
                     .or().like(Course::getCourseName, query.getKeyword()));
         }
         w.orderByDesc(Course::getId);
-        return PageResult.of(courseMapper.selectPage(page, w));
+        PageResult<Course> result = PageResult.of(courseMapper.selectPage(page, w));
+        cacheManager.put(MemoryCacheManager.PAGE_CACHE, cacheKey, result);
+        return result;
     }
 
     public List<Course> all() {
-        return courseMapper.selectList(new LambdaQueryWrapper<Course>().orderByDesc(Course::getId));
+        List<Course> hit = cacheManager.get(MemoryCacheManager.PAGE_CACHE, ALL_KEY);
+        if (hit != null) return hit;
+        List<Course> result = courseMapper.selectList(new LambdaQueryWrapper<Course>().orderByDesc(Course::getId));
+        cacheManager.put(MemoryCacheManager.PAGE_CACHE, ALL_KEY, result);
+        return result;
     }
 
     public List<Course> byMajor(Long majorId) {
-        return courseMapper.selectByMajorId(majorId);
+        String cacheKey = BY_MAJOR_KEY_PREFIX + majorId;
+        List<Course> hit = cacheManager.get(MemoryCacheManager.PAGE_CACHE, cacheKey);
+        if (hit != null) return hit;
+        List<Course> result = courseMapper.selectByMajorId(majorId);
+        cacheManager.put(MemoryCacheManager.PAGE_CACHE, cacheKey, result);
+        return result;
     }
 
     public Course detail(Long id) {
@@ -57,10 +80,12 @@ public class CourseService {
         } else {
             courseMapper.updateById(course);
         }
+        cacheManager.invalidateAll(MemoryCacheManager.PAGE_CACHE);
     }
 
     public void delete(Long id) {
         courseMapper.deleteById(id);
+        cacheManager.invalidateAll(MemoryCacheManager.PAGE_CACHE);
     }
 
     /**
@@ -69,7 +94,9 @@ public class CourseService {
     @Transactional
     public int batchDelete(List<Long> ids) {
         if (ids == null || ids.isEmpty()) return 0;
-        return courseMapper.deleteByIds(ids);
+        int deleted = courseMapper.deleteByIds(ids);
+        cacheManager.invalidateAll(MemoryCacheManager.PAGE_CACHE);
+        return deleted;
     }
 
     /**
@@ -91,6 +118,7 @@ public class CourseService {
                 majorCourseMapper.insert(mc);
             }
         }
+        cacheManager.invalidateAll(MemoryCacheManager.PAGE_CACHE);
     }
 
     public List<MajorCourse> majorCourses(Long majorId) {

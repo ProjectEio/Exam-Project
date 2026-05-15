@@ -2,7 +2,6 @@ package com.exam.module.registration.service;
 
 import com.exam.common.BizException;
 import com.exam.module.registration.entity.Registration;
-import com.exam.module.registration.mapper.RegistrationMapper;
 import com.itextpdf.text.BaseColor;
 import com.itextpdf.text.Document;
 import com.itextpdf.text.Element;
@@ -24,9 +23,6 @@ import java.nio.charset.StandardCharsets;
 
 @Service
 public class TicketPdfService {
-
-    @Autowired
-    private RegistrationMapper regMapper;
 
     @Autowired
     private RegistrationService registrationService;

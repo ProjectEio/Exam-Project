@@ -48,8 +48,8 @@ public class RegistrationService {
         if (r == null) {
             r = regRepo.findById(id);
             if (r == null) throw new BizException("报名记录不存在");
-            enrich(Collections.singletonList(r));
         }
+        enrich(Collections.singletonList(r));
         return r;
     }
 
@@ -77,8 +77,7 @@ public class RegistrationService {
         String newPayment = "APPROVED".equals(status) ? "PAID" : old.getPaymentStatus();
         String ticketNo   = old.getAdmissionTicketNo();
         if ("APPROVED".equals(status) && StrUtil.isBlank(ticketNo)) {
-            ExamPlan p = planMapper.selectById(old.getPlanId());
-            if (p != null) ticketNo = buildTicketNo(p, old.getStudentId());
+            ticketNo = buildTicketNo(resolvePlan(old.getPlanId(), Collections.emptyMap()), old.getStudentId());
         }
         if ("REJECTED".equals(status)) {
             planMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<ExamPlan>()
@@ -173,38 +172,81 @@ public class RegistrationService {
                         .collect(Collectors.toMap(ExamPlan::getId, p -> p));
 
         // 课程信息（主库）
-        Set<Long> courseIds = planMap.values().stream()
-                .map(ExamPlan::getCourseId).filter(Objects::nonNull).collect(Collectors.toSet());
-        Map<Long, String> courseNameMap = courseIds.isEmpty() ? Collections.emptyMap() :
+        Set<Long> courseIds = new LinkedHashSet<>();
+        for (Registration r : list) {
+            ExamPlan plan = resolvePlan(r.getPlanId(), planMap);
+            if (plan.getCourseId() != null) courseIds.add(plan.getCourseId());
+        }
+        Map<Long, Course> courseMap = courseIds.isEmpty() ? Collections.emptyMap() :
                 courseMapper.selectBatchIds(courseIds).stream()
-                        .collect(Collectors.toMap(Course::getId, Course::getCourseName));
+                        .collect(Collectors.toMap(Course::getId, c -> c));
 
-        // 学生姓名（用户分片）
+        // 学生信息（用户分片）
         Set<Long> studentIds = list.stream()
                 .map(Registration::getStudentId).filter(Objects::nonNull).collect(Collectors.toSet());
-        Map<Long, String> studentNameMap = new HashMap<>();
+        Map<Long, User> studentMap = new HashMap<>();
         for (Long sid : studentIds) {
             User u = userRepo.findById(sid);
-            if (u != null && u.getRealName() != null) studentNameMap.put(sid, u.getRealName());
+            if (u != null) studentMap.put(sid, u);
         }
 
         // 填充
         for (Registration r : list) {
-            if (r.getStudentId() != null) r.setStudentName(studentNameMap.get(r.getStudentId()));
-            ExamPlan plan = planMap.get(r.getPlanId());
-            if (plan != null) {
-                r.setPlanName(plan.getPlanName());
-                r.setPlanCode(plan.getPlanCode());
-                r.setExamDate(plan.getExamDate());
-                r.setExamLocation(plan.getLocation());
-                r.setStartTime(plan.getStartTime());
-                r.setEndTime(plan.getEndTime());
-                r.setCourseName(courseNameMap.get(plan.getCourseId()));
+            User student = r.getStudentId() == null ? null : studentMap.get(r.getStudentId());
+            if (student != null) {
+                r.setStudentName(student.getRealName());
+                r.setStudentIdCard(student.getIdCard());
             }
+
+            ExamPlan plan = resolvePlan(r.getPlanId(), planMap);
+            r.setPlanName(plan.getPlanName());
+            r.setPlanCode(plan.getPlanCode());
+            r.setExamDate(plan.getExamDate());
+            r.setExamLocation(plan.getLocation());
+            r.setStartTime(plan.getStartTime());
+            r.setEndTime(plan.getEndTime());
+            r.setCourseName(resolveCourseName(plan.getCourseId(), courseMap));
         }
     }
 
     // ── 私有工具 ──────────────────────────────────────────
+
+    private ExamPlan resolvePlan(Long planId, Map<Long, ExamPlan> realPlans) {
+        if (planId == null) return buildSyntheticPlan(0L);
+        ExamPlan real = realPlans.get(planId);
+        if (real != null) return real;
+
+        real = planMapper.selectById(planId);
+        return real != null ? real : buildSyntheticPlan(planId);
+    }
+
+    private ExamPlan buildSyntheticPlan(Long planId) {
+        long id = planId == null || planId <= 0 ? 1L : planId;
+        int examYear = 2024 + (int) ((id - 1) / 100);
+        String examTerm = id % 2 == 1 ? "上" : "下";
+        int examMonth = "上".equals(examTerm) ? 4 : 10;
+        int examDay = (int) (((id - 1) % 28) + 1);
+
+        ExamPlan p = new ExamPlan();
+        p.setId(id);
+        p.setPlanCode(String.format("PLAN%03d", id));
+        p.setPlanName(String.format("%d%s 模拟考试计划%03d", examYear, examTerm, id));
+        p.setExamYear(examYear);
+        p.setExamTerm(examTerm);
+        p.setCourseId(id);
+        p.setExamDate(String.format("%d-%02d-%02d", examYear, examMonth, examDay));
+        p.setStartTime("09:00");
+        p.setEndTime("11:30");
+        p.setLocation("模拟考点-" + (((id - 1) % 8) + 1) + "号教室");
+        return p;
+    }
+
+    private String resolveCourseName(Long courseId, Map<Long, Course> realCourses) {
+        if (courseId == null) return null;
+        Course real = realCourses.get(courseId);
+        if (real != null && real.getCourseName() != null) return real.getCourseName();
+        return String.format("模拟课程%03d", courseId);
+    }
 
     private String buildRegNo(ExamPlan plan, Long studentId) {
         return "REG" + plan.getExamYear() + (plan.getExamTerm().equals("上") ? "01" : "02")

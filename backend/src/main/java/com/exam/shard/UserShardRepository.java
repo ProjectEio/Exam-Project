@@ -214,23 +214,33 @@ public class UserShardRepository {
         String where = sb.toString();
         Object[] args = ps.toArray();
 
-        String countSql = "SELECT COUNT(*) FROM sys_user WHERE " + where;
+        boolean noKeyword = keyword == null;
         int    limit    = (int)(pageNum * pageSize);
         String dataSql  = "SELECT " + COLS + " FROM sys_user WHERE " + where
                 + " ORDER BY id DESC LIMIT " + limit;
 
         // 并行执行 count + data
-        List<Future<Long>>       countFutures = new ArrayList<>(NUM_SHARDS);
         List<Future<List<User>>> dataFutures  = new ArrayList<>(NUM_SHARDS);
         for (JdbcTemplate jt : shards) {
-            countFutures.add(pool.submit(() -> jt.queryForObject(countSql, Long.class, args)));
             dataFutures .add(pool.submit(() -> jt.query(dataSql, MAPPER, args)));
         }
 
-        long total = 0;
-        for (Future<Long> f : countFutures) {
-            try { Long c = f.get(); if (c != null) total += c; }
-            catch (Exception e) { log.error("User shard count error", e); }
+        long total;
+        if (noKeyword && status == null && (role == null || role.isBlank())) {
+            total = countAll();
+        } else if (noKeyword && status == null && role != null && !role.isBlank()) {
+            total = countByRole(role);
+        } else {
+            String countSql = "SELECT COUNT(*) FROM sys_user WHERE " + where;
+            List<Future<Long>> countFutures = new ArrayList<>(NUM_SHARDS);
+            for (JdbcTemplate jt : shards) {
+                countFutures.add(pool.submit(() -> jt.queryForObject(countSql, Long.class, args)));
+            }
+            total = 0;
+            for (Future<Long> f : countFutures) {
+                try { Long c = f.get(); if (c != null) total += c; }
+                catch (Exception e) { log.error("User shard count error", e); }
+            }
         }
 
         List<User> all = new ArrayList<>();
@@ -271,6 +281,7 @@ public class UserShardRepository {
                 user.getGender(), user.getStatus() == null ? 1 : user.getStatus());
         // 清除存在性缓存
         cache.remove(MemoryCacheManager.USER_CACHE, "u:exists:" + user.getUsername());
+        evictUserCountCaches();
         cache.invalidateAll(MemoryCacheManager.PAGE_CACHE);
     }
 
@@ -290,6 +301,7 @@ public class UserShardRepository {
         }
         // 清除缓存
         cache.remove(MemoryCacheManager.USER_CACHE, "u:id:" + user.getId());
+        evictUserCountCaches();
         cache.invalidateAll(MemoryCacheManager.PAGE_CACHE);
     }
 
@@ -298,7 +310,15 @@ public class UserShardRepository {
         shards[router.route(id)].update(
                 "UPDATE sys_user SET deleted=1 WHERE id=?", id);
         cache.remove(MemoryCacheManager.USER_CACHE, "u:id:" + id);
+        evictUserCountCaches();
         cache.invalidateAll(MemoryCacheManager.PAGE_CACHE);
+    }
+
+    private void evictUserCountCaches() {
+        cache.remove(MemoryCacheManager.USER_CACHE, "u:cnt:all");
+        for (String role : List.of("ADMIN", "TEACHER", "STUDENT")) {
+            cache.remove(MemoryCacheManager.USER_CACHE, "u:cnt:role:" + role);
+        }
     }
 
     // ═══════════════════════════════════════════════════════
@@ -334,6 +354,10 @@ public class UserShardRepository {
 
     /** 统计所有未删除用户总数（fan-out 8 分片求和） */
     public long countAll() {
+        String key = "u:cnt:all";
+        Long hit = cache.get(MemoryCacheManager.USER_CACHE, key);
+        if (hit != null) return hit;
+
         List<Future<Long>> futures = new ArrayList<>(NUM_SHARDS);
         for (JdbcTemplate jt : shards) {
             futures.add(pool.submit(() ->
@@ -344,11 +368,16 @@ public class UserShardRepository {
             try { Long c = f.get(); if (c != null) total += c; }
             catch (Exception e) { log.error("User countAll shard error", e); }
         }
+        cache.put(MemoryCacheManager.USER_CACHE, key, total);
         return total;
     }
 
     /** 统计指定角色的用户数（fan-out 8 分片求和） */
     public long countByRole(String role) {
+        String key = "u:cnt:role:" + role;
+        Long hit = cache.get(MemoryCacheManager.USER_CACHE, key);
+        if (hit != null) return hit;
+
         List<Future<Long>> futures = new ArrayList<>(NUM_SHARDS);
         for (JdbcTemplate jt : shards) {
             futures.add(pool.submit(() ->
@@ -359,6 +388,7 @@ public class UserShardRepository {
             try { Long c = f.get(); if (c != null) total += c; }
             catch (Exception e) { log.error("User countByRole shard error", e); }
         }
+        cache.put(MemoryCacheManager.USER_CACHE, key, total);
         return total;
     }
 }
