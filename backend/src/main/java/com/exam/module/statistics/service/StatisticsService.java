@@ -50,6 +50,19 @@ public class StatisticsService {
             } catch (Exception e) {
                 log.warn("[Stats] 预热失败，将在首次请求时重试", e);
             }
+            // 预热后异步触发 WAL checkpoint，把 WAL 合并回主文件以加快后续读取
+            Thread ckpt = new Thread(() -> {
+                try {
+                    log.info("[Stats] 开始 WAL checkpoint...");
+                    scoreRepo.checkpointAll();
+                    regRepo.checkpointAll();
+                    log.info("[Stats] WAL checkpoint 完成");
+                } catch (Exception e) {
+                    log.warn("[Stats] WAL checkpoint 出错: {}", e.getMessage());
+                }
+            }, "wal-checkpoint");
+            ckpt.setDaemon(true);
+            ckpt.start();
         }, "stats-warm");
         t.setDaemon(true);
         t.start();

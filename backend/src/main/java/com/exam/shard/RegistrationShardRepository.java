@@ -219,6 +219,17 @@ public class RegistrationShardRepository {
      * 支持过滤条件的跨分片分页，供管理后台报名列表使用。
      * 若指定 studentId，精准路由单分片；否则 fan-out 8 分片后内存合并。
      */
+    /**
+     * 触发 WAL checkpoint（PASSIVE 模式，不阻塞当前读写）。
+     */
+    public void checkpointAll() {
+        for (JdbcTemplate tpl : templates) {
+            try { tpl.execute("PRAGMA wal_checkpoint(PASSIVE)"); }
+            catch (Exception e) { log.warn("Reg shard WAL checkpoint failed: {}", e.getMessage()); }
+        }
+        log.info("[RegShard] WAL checkpoint 完成");
+    }
+
     public PageResult<Registration> page(RegistrationQueryDTO q) {
         // ── 构造 WHERE 子句 ──
         StringBuilder where = new StringBuilder(" WHERE deleted=0");
@@ -234,22 +245,39 @@ public class RegistrationShardRepository {
         int pageSize = q.getSize()    != null ? q.getSize().intValue()    : 10;
 
         // ── 确定目标分片 ──
+        boolean noFilter = (q.getStudentId() == null && q.getPlanId() == null
+                && (q.getStatus() == null || q.getStatus().isEmpty())
+                && (q.getPaymentStatus() == null || q.getPaymentStatus().isEmpty()));
         int[] shards = (q.getStudentId() != null)
                 ? new int[]{ router.route(q.getStudentId()) }
                 : new int[]{0,1,2,3,4,5,6,7};
 
-        // ── 并行统计总数 ──
-        String countSql = "SELECT COUNT(*) FROM sys_registration" + whereStr;
-        List<CompletableFuture<Long>> cntFutures = new ArrayList<>();
-        for (int s : shards) {
-            JdbcTemplate tpl = templates[s];
-            cntFutures.add(CompletableFuture.supplyAsync(
-                    () -> Optional.ofNullable(tpl.queryForObject(countSql, Long.class, baseArr)).orElse(0L),
-                    executor));
+        // ── 统计总数（有缓存则跳过 COUNT 查询）──
+        long total;
+        if (noFilter) {
+            // globalStats 在启动预热时已填充缓存，直接读（O(1)）
+            total = toLong(globalStats().get("totalCount"));
+        } else {
+            String cntKey = "shard:rg:page:cnt:" + q.getStudentId() + ":" + q.getPlanId()
+                    + ":" + q.getStatus() + ":" + q.getPaymentStatus();
+            Long cached = cache.get(CACHE, cntKey);
+            if (cached != null) {
+                total = cached;
+            } else {
+                String countSql = "SELECT COUNT(*) FROM sys_registration" + whereStr;
+                List<CompletableFuture<Long>> cntFutures = new ArrayList<>();
+                for (int s : shards) {
+                    JdbcTemplate tpl = templates[s];
+                    cntFutures.add(CompletableFuture.supplyAsync(
+                            () -> Optional.ofNullable(tpl.queryForObject(countSql, Long.class, baseArr)).orElse(0L),
+                            executor));
+                }
+                total = cntFutures.stream().mapToLong(f -> {
+                    try { return f.get(30, TimeUnit.SECONDS); } catch (Exception e) { return 0L; }
+                }).sum();
+                cache.put(CACHE, cntKey, total);
+            }
         }
-        long total = cntFutures.stream().mapToLong(f -> {
-            try { return f.get(30, TimeUnit.SECONDS); } catch (Exception e) { return 0L; }
-        }).sum();
         if (total == 0) return PageResult.of(Collections.emptyList(), 0L, pageNum, pageSize);
 
         // ── 并行取各分片 Top N 行 ──

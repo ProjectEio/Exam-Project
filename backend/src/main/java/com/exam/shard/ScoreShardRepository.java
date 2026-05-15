@@ -288,6 +288,18 @@ public class ScoreShardRepository {
      * 支持过滤条件的跨分片分页，供管理后台成绩列表使用。
      * 若指定 studentId，精准路由单分片；否则 fan-out 8 分片后内存合并。
      */
+    /**
+     * 触发 WAL checkpoint（PASSIVE 模式，不阻塞当前读写）。
+     * 建议在数据生成完成后调用一次，合并 WAL 可显著加快后续读速度。
+     */
+    public void checkpointAll() {
+        for (JdbcTemplate tpl : templates) {
+            try { tpl.execute("PRAGMA wal_checkpoint(PASSIVE)"); }
+            catch (Exception e) { log.warn("Score shard WAL checkpoint failed: {}", e.getMessage()); }
+        }
+        log.info("[ScoreShard] WAL checkpoint 完成");
+    }
+
     public PageResult<Score> page(ScoreQueryDTO q) {
         // ── 构造 WHERE 子句 ──
         StringBuilder where = new StringBuilder(" WHERE deleted=0");
@@ -304,22 +316,40 @@ public class ScoreShardRepository {
         int pageSize = q.getSize()    != null ? q.getSize().intValue()    : 10;
 
         // ── 确定目标分片 ──
+        boolean noFilter = (q.getStudentId() == null && q.getCourseId() == null
+                && q.getExamYear() == null
+                && (q.getExamTerm() == null || q.getExamTerm().isEmpty())
+                && (q.getStatus() == null || q.getStatus().isEmpty()));
         int[] shards = (q.getStudentId() != null)
                 ? new int[]{ router.route(q.getStudentId()) }
                 : new int[]{0,1,2,3,4,5,6,7};
 
-        // ── 并行统计总数 ──
-        String countSql = "SELECT COUNT(*) FROM sys_score" + whereStr;
-        List<CompletableFuture<Long>> cntFutures = new ArrayList<>();
-        for (int s : shards) {
-            JdbcTemplate tpl = templates[s];
-            cntFutures.add(CompletableFuture.supplyAsync(
-                    () -> Optional.ofNullable(tpl.queryForObject(countSql, Long.class, baseArr)).orElse(0L),
-                    executor));
+        // ── 统计总数（有缓存则跳过 COUNT 查询）──
+        long total;
+        if (noFilter) {
+            // globalStats 在启动预热时已填充缓存，直接读（O(1)）
+            total = toLong(globalStats().get("totalCount"));
+        } else {
+            String cntKey = "shard:sc:page:cnt:" + q.getStudentId() + ":" + q.getCourseId()
+                    + ":" + q.getExamYear() + ":" + q.getExamTerm() + ":" + q.getStatus();
+            Long cached = cache.get(MemoryCacheManager.PAGE_CACHE, cntKey);
+            if (cached != null) {
+                total = cached;
+            } else {
+                String countSql = "SELECT COUNT(*) FROM sys_score" + whereStr;
+                List<CompletableFuture<Long>> cntFutures = new ArrayList<>();
+                for (int s : shards) {
+                    JdbcTemplate tpl = templates[s];
+                    cntFutures.add(CompletableFuture.supplyAsync(
+                            () -> Optional.ofNullable(tpl.queryForObject(countSql, Long.class, baseArr)).orElse(0L),
+                            executor));
+                }
+                total = cntFutures.stream().mapToLong(f -> {
+                    try { return f.get(30, TimeUnit.SECONDS); } catch (Exception e) { return 0L; }
+                }).sum();
+                cache.put(MemoryCacheManager.PAGE_CACHE, cntKey, total);
+            }
         }
-        long total = cntFutures.stream().mapToLong(f -> {
-            try { return f.get(30, TimeUnit.SECONDS); } catch (Exception e) { return 0L; }
-        }).sum();
         if (total == 0) return PageResult.of(Collections.emptyList(), 0L, pageNum, pageSize);
 
         // ── 并行取各分片 Top N 行 ──
