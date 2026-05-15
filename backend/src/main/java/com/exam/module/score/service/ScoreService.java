@@ -16,6 +16,7 @@ import com.exam.module.score.dto.ScoreQueryDTO;
 import com.exam.module.score.entity.Score;
 import com.exam.module.score.mapper.ScoreMapper;
 import com.exam.module.user.entity.User;
+import com.exam.shard.ScoreShardRepository;
 import com.exam.shard.UserShardRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -30,6 +31,9 @@ public class ScoreService {
 
     @Autowired
     private ScoreMapper scoreMapper;
+
+    @Autowired
+    private ScoreShardRepository scoreRepo;
 
     @Autowired
     private UserShardRepository userRepo;
@@ -49,8 +53,7 @@ public class ScoreService {
         PageResult<Score> cached = cacheManager.get(MemoryCacheManager.PAGE_CACHE, cacheKey);
         if (cached != null) return cached;
 
-        Page<Score> p = new Page<>(query.getCurrent(), query.getSize());
-        PageResult<Score> result = PageResult.of(scoreMapper.pageWithJoin(p, query));
+        PageResult<Score> result = scoreRepo.page(query);
         cacheManager.put(MemoryCacheManager.PAGE_CACHE, cacheKey, result);
         return result;
     }

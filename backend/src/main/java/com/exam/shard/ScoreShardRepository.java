@@ -1,6 +1,9 @@
 package com.exam.shard;
 
 import com.exam.cache.MemoryCacheManager;
+import com.exam.common.PageResult;
+import com.exam.module.score.dto.ScoreQueryDTO;
+import com.exam.module.score.entity.Score;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -276,4 +279,85 @@ public class ScoreShardRepository {
     public JdbcTemplate getTemplate(int shardIdx) { return templates[shardIdx]; }
     public int           getNumShards()            { return templates.length; }
     public ShardRouter   getRouter()               { return router; }
+
+    // ════════════════════════════════════════════════════
+    //  跨分片分页（管理后台）
+    // ════════════════════════════════════════════════════
+
+    /**
+     * 支持过滤条件的跨分片分页，供管理后台成绩列表使用。
+     * 若指定 studentId，精准路由单分片；否则 fan-out 8 分片后内存合并。
+     */
+    public PageResult<Score> page(ScoreQueryDTO q) {
+        // ── 构造 WHERE 子句 ──
+        StringBuilder where = new StringBuilder(" WHERE deleted=0");
+        List<Object> params = new ArrayList<>();
+        if (q.getStudentId() != null) { where.append(" AND student_id=?"); params.add(q.getStudentId()); }
+        if (q.getCourseId()  != null) { where.append(" AND course_id=?");  params.add(q.getCourseId()); }
+        if (q.getExamYear()  != null) { where.append(" AND exam_year=?");  params.add(q.getExamYear()); }
+        if (q.getExamTerm()  != null && !q.getExamTerm().isEmpty()) { where.append(" AND exam_term=?"); params.add(q.getExamTerm()); }
+        if (q.getStatus()    != null && !q.getStatus().isEmpty())   { where.append(" AND status=?");    params.add(q.getStatus()); }
+
+        String whereStr  = where.toString();
+        Object[] baseArr = params.toArray();
+        int pageNum  = q.getCurrent() != null ? q.getCurrent().intValue() : 1;
+        int pageSize = q.getSize()    != null ? q.getSize().intValue()    : 10;
+
+        // ── 确定目标分片 ──
+        int[] shards = (q.getStudentId() != null)
+                ? new int[]{ router.route(q.getStudentId()) }
+                : new int[]{0,1,2,3,4,5,6,7};
+
+        // ── 并行统计总数 ──
+        String countSql = "SELECT COUNT(*) FROM sys_score" + whereStr;
+        List<CompletableFuture<Long>> cntFutures = new ArrayList<>();
+        for (int s : shards) {
+            JdbcTemplate tpl = templates[s];
+            cntFutures.add(CompletableFuture.supplyAsync(
+                    () -> Optional.ofNullable(tpl.queryForObject(countSql, Long.class, baseArr)).orElse(0L),
+                    executor));
+        }
+        long total = cntFutures.stream().mapToLong(f -> {
+            try { return f.get(30, TimeUnit.SECONDS); } catch (Exception e) { return 0L; }
+        }).sum();
+        if (total == 0) return PageResult.of(Collections.emptyList(), 0L, pageNum, pageSize);
+
+        // ── 并行取各分片 Top N 行 ──
+        int limit = pageNum * pageSize;
+        String dataSql = "SELECT id,student_id,course_id,plan_id,exam_year,exam_term,score,status,exam_date"
+                + " FROM sys_score" + whereStr + " ORDER BY id DESC LIMIT ?";
+        Object[] dataArr = Arrays.copyOf(baseArr, baseArr.length + 1);
+        dataArr[baseArr.length] = limit;
+
+        List<CompletableFuture<List<Score>>> dataFutures = new ArrayList<>();
+        for (int s : shards) {
+            JdbcTemplate tpl = templates[s];
+            dataFutures.add(CompletableFuture.supplyAsync(
+                    () -> tpl.query(dataSql, (rs, i) -> {
+                        Score sc = new Score();
+                        sc.setId(rs.getLong("id"));
+                        sc.setStudentId(rs.getLong("student_id"));
+                        sc.setCourseId(rs.getLong("course_id"));
+                        long pid = rs.getLong("plan_id");
+                        if (!rs.wasNull()) sc.setPlanId(pid);
+                        sc.setExamYear(rs.getInt("exam_year"));
+                        sc.setExamTerm(rs.getString("exam_term"));
+                        double sv = rs.getDouble("score");
+                        if (!rs.wasNull()) sc.setScore(sv);
+                        sc.setStatus(rs.getString("status"));
+                        sc.setExamDate(rs.getString("exam_date"));
+                        return sc;
+                    }, dataArr),
+                    executor));
+        }
+        List<Score> merged = new ArrayList<>();
+        for (CompletableFuture<List<Score>> f : dataFutures) {
+            try { merged.addAll(f.get(30, TimeUnit.SECONDS)); }
+            catch (Exception e) { log.warn("Score page merge failed: {}", e.getMessage()); }
+        }
+        merged.sort((a, b) -> Long.compare(b.getId(), a.getId()));
+        int from = Math.min((pageNum - 1) * pageSize, merged.size());
+        int to   = Math.min(from + pageSize, merged.size());
+        return PageResult.of(new ArrayList<>(merged.subList(from, to)), total, pageNum, pageSize);
+    }
 }

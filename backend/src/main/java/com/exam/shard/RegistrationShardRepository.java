@@ -1,6 +1,9 @@
 package com.exam.shard;
 
 import com.exam.cache.MemoryCacheManager;
+import com.exam.common.PageResult;
+import com.exam.module.registration.dto.RegistrationQueryDTO;
+import com.exam.module.registration.entity.Registration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -207,6 +210,89 @@ public class RegistrationShardRepository {
     public JdbcTemplate getTemplate(int shardIdx) { return templates[shardIdx]; }
     public int           getNumShards()            { return templates.length; }
     public ShardRouter   getRouter()               { return router; }
+
+    // ════════════════════════════════════════════════════
+    //  跨分片分页（管理后台）
+    // ════════════════════════════════════════════════════
+
+    /**
+     * 支持过滤条件的跨分片分页，供管理后台报名列表使用。
+     * 若指定 studentId，精准路由单分片；否则 fan-out 8 分片后内存合并。
+     */
+    public PageResult<Registration> page(RegistrationQueryDTO q) {
+        // ── 构造 WHERE 子句 ──
+        StringBuilder where = new StringBuilder(" WHERE deleted=0");
+        List<Object> params = new ArrayList<>();
+        if (q.getStudentId()     != null) { where.append(" AND student_id=?");     params.add(q.getStudentId()); }
+        if (q.getPlanId()        != null) { where.append(" AND plan_id=?");        params.add(q.getPlanId()); }
+        if (q.getStatus()        != null && !q.getStatus().isEmpty())        { where.append(" AND status=?");         params.add(q.getStatus()); }
+        if (q.getPaymentStatus() != null && !q.getPaymentStatus().isEmpty()) { where.append(" AND payment_status=?"); params.add(q.getPaymentStatus()); }
+
+        String whereStr  = where.toString();
+        Object[] baseArr = params.toArray();
+        int pageNum  = q.getCurrent() != null ? q.getCurrent().intValue() : 1;
+        int pageSize = q.getSize()    != null ? q.getSize().intValue()    : 10;
+
+        // ── 确定目标分片 ──
+        int[] shards = (q.getStudentId() != null)
+                ? new int[]{ router.route(q.getStudentId()) }
+                : new int[]{0,1,2,3,4,5,6,7};
+
+        // ── 并行统计总数 ──
+        String countSql = "SELECT COUNT(*) FROM sys_registration" + whereStr;
+        List<CompletableFuture<Long>> cntFutures = new ArrayList<>();
+        for (int s : shards) {
+            JdbcTemplate tpl = templates[s];
+            cntFutures.add(CompletableFuture.supplyAsync(
+                    () -> Optional.ofNullable(tpl.queryForObject(countSql, Long.class, baseArr)).orElse(0L),
+                    executor));
+        }
+        long total = cntFutures.stream().mapToLong(f -> {
+            try { return f.get(30, TimeUnit.SECONDS); } catch (Exception e) { return 0L; }
+        }).sum();
+        if (total == 0) return PageResult.of(Collections.emptyList(), 0L, pageNum, pageSize);
+
+        // ── 并行取各分片 Top N 行 ──
+        int limit = pageNum * pageSize;
+        String dataSql = "SELECT id,student_id,plan_id,registration_no,admission_ticket_no,"
+                + "payment_status,status,audit_remark,register_time"
+                + " FROM sys_registration" + whereStr + " ORDER BY id DESC LIMIT ?";
+        Object[] dataArr = Arrays.copyOf(baseArr, baseArr.length + 1);
+        dataArr[baseArr.length] = limit;
+
+        List<CompletableFuture<List<Registration>>> dataFutures = new ArrayList<>();
+        for (int s : shards) {
+            JdbcTemplate tpl = templates[s];
+            dataFutures.add(CompletableFuture.supplyAsync(
+                    () -> tpl.query(dataSql, (rs, i) -> {
+                        Registration r = new Registration();
+                        r.setId(rs.getLong("id"));
+                        r.setStudentId(rs.getLong("student_id"));
+                        r.setPlanId(rs.getLong("plan_id"));
+                        r.setRegistrationNo(rs.getString("registration_no"));
+                        r.setAdmissionTicketNo(rs.getString("admission_ticket_no"));
+                        r.setPaymentStatus(rs.getString("payment_status"));
+                        r.setStatus(rs.getString("status"));
+                        r.setAuditRemark(rs.getString("audit_remark"));
+                        String rt = rs.getString("register_time");
+                        if (rt != null) {
+                            try { r.setRegisterTime(java.time.LocalDateTime.parse(rt.replace(" ", "T"))); }
+                            catch (Exception ignored) {}
+                        }
+                        return r;
+                    }, dataArr),
+                    executor));
+        }
+        List<Registration> merged = new ArrayList<>();
+        for (CompletableFuture<List<Registration>> f : dataFutures) {
+            try { merged.addAll(f.get(30, TimeUnit.SECONDS)); }
+            catch (Exception e) { log.warn("Registration page merge failed: {}", e.getMessage()); }
+        }
+        merged.sort((a, b) -> Long.compare(b.getId(), a.getId()));
+        int from = Math.min((pageNum - 1) * pageSize, merged.size());
+        int to   = Math.min(from + pageSize, merged.size());
+        return PageResult.of(new ArrayList<>(merged.subList(from, to)), total, pageNum, pageSize);
+    }
 
     private long toLong(Object o) {
         return o == null ? 0L : ((Number) o).longValue();

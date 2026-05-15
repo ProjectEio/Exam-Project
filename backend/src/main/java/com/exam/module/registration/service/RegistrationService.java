@@ -2,7 +2,6 @@ package com.exam.module.registration.service;
 
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.exam.common.BizException;
 import com.exam.common.PageResult;
 import com.exam.common.UserContext;
@@ -11,6 +10,7 @@ import com.exam.module.plan.mapper.ExamPlanMapper;
 import com.exam.module.registration.dto.RegistrationQueryDTO;
 import com.exam.module.registration.entity.Registration;
 import com.exam.module.registration.mapper.RegistrationMapper;
+import com.exam.shard.RegistrationShardRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,11 +25,13 @@ public class RegistrationService {
     private RegistrationMapper regMapper;
 
     @Autowired
+    private RegistrationShardRepository regRepo;
+
+    @Autowired
     private ExamPlanMapper planMapper;
 
     public PageResult<Registration> page(RegistrationQueryDTO query) {
-        Page<Registration> page = new Page<>(query.getCurrent(), query.getSize());
-        return PageResult.of(regMapper.pageWithJoin(page, query));
+        return regRepo.page(query);
     }
 
     public List<Registration> myRegistrations() {
