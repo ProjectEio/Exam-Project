@@ -37,4 +37,11 @@ public interface RegistrationMapper extends BaseMapper<Registration> {
 
     @Update("UPDATE sys_exam_plan SET registered_count = MAX(registered_count - 1, 0) WHERE id = #{planId}")
     int decrementRegistered(Long planId);
+
+    /**
+     * 报名重复检查 — EXISTS + LIMIT 1，命中即停，不全表 COUNT
+     * 返回 1 表示已存在，null 表示不存在
+     */
+    @Select("SELECT 1 FROM sys_registration WHERE student_id=#{studentId} AND plan_id=#{planId} AND deleted=0 LIMIT 1")
+    Integer existsByStudentAndPlan(@Param("studentId") Long studentId, @Param("planId") Long planId);
 }

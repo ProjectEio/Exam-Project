@@ -43,8 +43,7 @@ public class MajorService {
     public void save(Major major) {
         if (major.getStatus() == null) major.setStatus(1);
         if (major.getId() == null) {
-            Long c = majorMapper.selectCount(new LambdaQueryWrapper<Major>().eq(Major::getMajorCode, major.getMajorCode()));
-            if (c > 0) throw new BizException("专业代码已存在");
+            if (majorMapper.existsByMajorCode(major.getMajorCode()) != null) throw new BizException("专业代码已存在");
             majorMapper.insert(major);
         } else {
             majorMapper.updateById(major);

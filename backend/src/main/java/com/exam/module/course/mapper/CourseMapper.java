@@ -19,6 +19,10 @@ public interface CourseMapper extends BaseMapper<Course> {
             """)
     List<Course> selectByMajorId(Long majorId);
 
+    /** 课程代码唯一性检查 — LIMIT 1 短路，不扫全表 */
+    @Select("SELECT 1 FROM sys_course WHERE course_code = #{courseCode} AND deleted = 0 LIMIT 1")
+    Integer existsByCourseCode(String courseCode);
+
     @Select("""
             SELECT course_type AS type, COUNT(*) AS count
             FROM sys_course

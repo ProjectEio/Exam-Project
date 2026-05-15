@@ -47,8 +47,8 @@ public class AuthService {
     }
 
     public void register(RegisterDTO dto) {
-        Long count = userMapper.selectCount(new LambdaQueryWrapper<User>().eq(User::getUsername, dto.getUsername()));
-        if (count > 0) throw new BizException("用户名已存在");
+        // EXISTS + LIMIT 1，命中即停，避免 COUNT(*) 全索引扫描
+        if (userMapper.existsByUsername(dto.getUsername()) != null) throw new BizException("用户名已存在");
 
         User user = new User();
         user.setUsername(dto.getUsername());

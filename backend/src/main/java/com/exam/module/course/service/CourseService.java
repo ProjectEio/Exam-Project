@@ -52,8 +52,7 @@ public class CourseService {
 
     public void save(Course course) {
         if (course.getId() == null) {
-            Long c = courseMapper.selectCount(new LambdaQueryWrapper<Course>().eq(Course::getCourseCode, course.getCourseCode()));
-            if (c > 0) throw new BizException("课程代码已存在");
+            if (courseMapper.existsByCourseCode(course.getCourseCode()) != null) throw new BizException("课程代码已存在");
             courseMapper.insert(course);
         } else {
             courseMapper.updateById(course);

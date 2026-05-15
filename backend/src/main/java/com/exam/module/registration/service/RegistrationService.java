@@ -53,10 +53,8 @@ public class RegistrationService {
             throw new BizException("报名人数已满");
         }
 
-        Long exist = regMapper.selectCount(new LambdaQueryWrapper<Registration>()
-                .eq(Registration::getStudentId, sid)
-                .eq(Registration::getPlanId, planId));
-        if (exist > 0) throw new BizException("您已报名该计划");
+        // EXISTS + LIMIT 1：主键已是 UNIQUE(student_id, plan_id)，直接索引命中
+        if (regMapper.existsByStudentAndPlan(sid, planId) != null) throw new BizException("您已报名该计划");
 
         // 报名期检查（如果配置了 register_start / register_end）
         String today = java.time.LocalDate.now().toString();

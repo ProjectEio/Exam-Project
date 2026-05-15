@@ -10,14 +10,19 @@ spring:
   application:
     name: exam-backend
   datasource:
-    url: jdbc:sqlite:exam.db
+    # 主库：WAL 模式 + 内存映射 + 缓存优化（数据文件统一放 data/ 目录）
+    url: jdbc:sqlite:data/exam.db?journal_mode=WAL&synchronous=NORMAL&cache_size=20000&temp_store=MEMORY&mmap_size=268435456&busy_timeout=10000
     driver-class-name: org.sqlite.JDBC
     username:
     password:
     hikari:
-      maximum-pool-size: 1
-      minimum-idle: 1
+      maximum-pool-size: 4
+      minimum-idle: 2
       connection-test-query: SELECT 1
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+      pool-name: main-pool
   sql:
     init:
       mode: never
@@ -36,6 +41,10 @@ spring:
   web:
     resources:
       add-mappings: false
+
+# 分片数据源基路径（留空则相对工作目录）
+shard:
+  base-path: "data/"
 
 mybatis-plus:
   mapper-locations: classpath*:mapper/**/*.xml

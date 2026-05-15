@@ -17,5 +17,9 @@ Thumbs.db
 *.bak
 *.swp
 
-# 本地数据库
+# 本地数据库（统一存放在 backend/data/）
+backend/data/
 exam.db
+exam.db-wal
+exam.db-shm
+*.db.initialized

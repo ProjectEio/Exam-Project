@@ -60,9 +60,8 @@ public class UserService {
         user.setStatus(dto.getStatus() == null ? 1 : dto.getStatus());
 
         if (dto.getId() == null) {
-            // 新增
-            Long count = userMapper.selectCount(new LambdaQueryWrapper<User>().eq(User::getUsername, dto.getUsername()));
-            if (count > 0) throw new BizException("用户名已存在");
+            // 新增：EXISTS + LIMIT 1，命中即返回，无需全表 COUNT
+            if (userMapper.existsByUsername(dto.getUsername()) != null) throw new BizException("用户名已存在");
             if (!StringUtils.hasText(dto.getPassword())) throw new BizException("新增用户需指定密码");
             user.setPassword(passwordEncoder.encode(dto.getPassword()));
             userMapper.insert(user);
