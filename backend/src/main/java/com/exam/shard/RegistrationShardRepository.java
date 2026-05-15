@@ -356,4 +356,83 @@ public class RegistrationShardRepository {
     private long toLong(Object o) {
         return o == null ? 0L : ((Number) o).longValue();
     }
+
+    // ════════════════════════════════════════════════════
+    //  按主键操作（admin detail / audit / cancel / ticket）
+    // ════════════════════════════════════════════════════
+
+    private static final String REG_SELECT_COLS =
+            "id,student_id,plan_id,registration_no,admission_ticket_no,"
+            + "payment_status,status,audit_remark,register_time";
+
+    private static final org.springframework.jdbc.core.RowMapper<Registration> REG_ROW_MAPPER =
+            (rs, i) -> {
+                Registration r = new Registration();
+                r.setId(rs.getLong("id"));
+                r.setStudentId(rs.getLong("student_id"));
+                r.setPlanId(rs.getLong("plan_id"));
+                r.setRegistrationNo(rs.getString("registration_no"));
+                r.setAdmissionTicketNo(rs.getString("admission_ticket_no"));
+                r.setPaymentStatus(rs.getString("payment_status"));
+                r.setStatus(rs.getString("status"));
+                r.setAuditRemark(rs.getString("audit_remark"));
+                String rt = rs.getString("register_time");
+                if (rt != null) {
+                    try { r.setRegisterTime(java.time.LocalDateTime.parse(rt.replace(" ", "T"))); }
+                    catch (Exception ignored) {}
+                }
+                return r;
+            };
+
+    /**
+     * 按主键 fan-out 查找单条报名（admin detail/ticket/audit/cancel 用）。
+     * 因分片 key 是 student_id，id 可能分布在任意分片，需扫描全部。
+     */
+    public Registration findById(Long id) {
+        String sql = "SELECT " + REG_SELECT_COLS
+                + " FROM sys_registration WHERE id=? AND deleted=0 LIMIT 1";
+        for (JdbcTemplate tpl : templates) {
+            try {
+                List<Registration> rows = tpl.query(sql, REG_ROW_MAPPER, id);
+                if (!rows.isEmpty()) return rows.get(0);
+            } catch (Exception e) { log.warn("Registration findById shard error: {}", e.getMessage()); }
+        }
+        return null;
+    }
+
+    /**
+     * 更新报名状态（fan-out，找到对应分片后执行 UPDATE）。
+     */
+    public boolean updateStatus(Long id, String status, String remark,
+                                String admissionTicketNo, String paymentStatus) {
+        String sql = "UPDATE sys_registration SET status=?,audit_remark=?,"
+                + "admission_ticket_no=?,payment_status=? WHERE id=? AND deleted=0";
+        for (JdbcTemplate tpl : templates) {
+            try {
+                int affected = tpl.update(sql, status, remark, admissionTicketNo, paymentStatus, id);
+                if (affected > 0) {
+                    cache.invalidateAll(CACHE);
+                    return true;
+                }
+            } catch (Exception e) { log.warn("Registration updateStatus shard error: {}", e.getMessage()); }
+        }
+        return false;
+    }
+
+    /**
+     * 软删除（fan-out）。
+     */
+    public boolean softDelete(Long id) {
+        for (JdbcTemplate tpl : templates) {
+            try {
+                int affected = tpl.update(
+                        "UPDATE sys_registration SET deleted=1 WHERE id=? AND deleted=0", id);
+                if (affected > 0) {
+                    cache.invalidateAll(CACHE);
+                    return true;
+                }
+            } catch (Exception e) { log.warn("Registration softDelete shard error: {}", e.getMessage()); }
+        }
+        return false;
+    }
 }

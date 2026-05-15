@@ -28,8 +28,12 @@ public class TicketPdfService {
     @Autowired
     private RegistrationMapper regMapper;
 
+    @Autowired
+    private RegistrationService registrationService;
+
     public void exportTicket(Long registrationId, HttpServletResponse response) throws Exception {
-        Registration r = regMapper.detailWithJoin(registrationId);
+        // 先查主库（新报名），再 fan-out 分片（历史报名）
+        Registration r = registrationService.detail(registrationId);
         if (r == null) throw new BizException("报名记录不存在");
         if (!"APPROVED".equals(r.getStatus())) throw new BizException("仅审核通过的报名可下载准考证");
 
