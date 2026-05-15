@@ -51,6 +51,9 @@ public class ShardDataSourceConfig {
 
     @Bean("scoreShardDataSources")
     public DataSource[] scoreShardDataSources() {
+        // 确保 data/ 目录存在（分片文件初始化早于 DatabaseInitializer）
+        try { java.nio.file.Files.createDirectories(java.nio.file.Paths.get(basePath)); }
+        catch (Exception e) { log.warn("创建分片目录失败: {}", e.getMessage()); }
         DataSource[] sources = new DataSource[NUM_SHARDS];
         for (int i = 0; i < NUM_SHARDS; i++) {
             String dbFile = basePath + "exam_score_" + i + ".db";
