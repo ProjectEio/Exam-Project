@@ -3,6 +3,9 @@ package com.exam.module.statistics.service;
 import com.exam.module.statistics.dto.ChartItem;
 import com.exam.module.statistics.dto.OverviewVO;
 import com.exam.module.statistics.mapper.StatisticsMapper;
+import com.exam.module.course.mapper.CourseMapper;
+import com.exam.module.plan.mapper.ExamPlanMapper;
+import com.exam.module.plan.entity.ExamPlan;
 import com.exam.shard.RegistrationShardRepository;
 import com.exam.shard.ScoreShardRepository;
 import com.exam.shard.UserShardRepository;
@@ -13,9 +16,11 @@ import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
-import java.util.List;
-import java.util.Map;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
 
 @Service
 public class StatisticsService {
@@ -28,6 +33,8 @@ public class StatisticsService {
     @Autowired private UserShardRepository         userRepo;
     @Autowired private ScoreShardRepository        scoreRepo;
     @Autowired private RegistrationShardRepository regRepo;
+    @Autowired private CourseMapper                courseMapper;
+    @Autowired private ExamPlanMapper              planMapper;
 
     /** 缓存概览结果，避免每次请求都 fan-out 8 分片 */
     private final AtomicReference<OverviewVO> cachedOverview = new AtomicReference<>(null);
@@ -110,19 +117,71 @@ public class StatisticsService {
         try { return Long.parseLong(v.toString()); } catch (Exception e) { return 0L; }
     }
 
+    /**
+     * 报名趋势（按学期）：从报名分片聚合 plan_id→count，
+     * 再关联主库 exam_plan 得到学期标签。
+     */
     public List<ChartItem> registrationTrend() {
-        return statMapper.registrationTrend();
+        Map<Long, Long> planCounts = regRepo.countByPlanId();
+        List<ExamPlan> plans = planMapper.selectList(null);
+
+        // 按 "年-学期" 合并（同一学期可能有多个计划）
+        Map<String, Long> byTerm = new LinkedHashMap<>();
+        plans.stream()
+                .sorted(Comparator.comparingInt(ExamPlan::getExamYear)
+                        .thenComparing(p -> "上".equals(p.getExamTerm()) ? 1 : 2))
+                .forEach(p -> {
+                    String label = p.getExamYear() + "-" + p.getExamTerm();
+                    long cnt = planCounts.getOrDefault(p.getId(), 0L);
+                    byTerm.merge(label, cnt, Long::sum);
+                });
+
+        return byTerm.entrySet().stream()
+                .map(e -> new ChartItem(e.getKey(), BigDecimal.valueOf(e.getValue())))
+                .collect(Collectors.toList());
     }
 
+    /**
+     * 课程合格率 Top10：从成绩分片聚合 course_id→(total,pass)，
+     * 再关联主库 sys_course 得到课程名。
+     */
     public List<ChartItem> coursePassRate() {
-        return statMapper.coursePassRate();
+        Map<Long, long[]> stats = scoreRepo.coursePassStats();
+        // 构造 courseId→name 映射（主库，无需分片）
+        Map<Long, String> nameMap = new HashMap<>();
+        courseMapper.selectList(null).forEach(c -> nameMap.put(c.getId(), c.getCourseName()));
+
+        return stats.entrySet().stream()
+                .filter(e -> e.getValue()[0] > 0)
+                .map(e -> {
+                    String name  = nameMap.getOrDefault(e.getKey(), "课程" + e.getKey());
+                    long   total = e.getValue()[0];
+                    long   pass  = e.getValue()[1];
+                    double rate  = pass * 100.0 / total;
+                    return new ChartItem(name, BigDecimal.valueOf(rate).setScale(1, RoundingMode.HALF_UP));
+                })
+                .sorted((a, b) -> b.getValue().compareTo(a.getValue()))
+                .limit(10)
+                .collect(Collectors.toList());
     }
 
+    /** 专业-计划数分布（主库数据，无需走分片）*/
     public List<ChartItem> majorDistribution() {
         return statMapper.majorDistribution();
     }
 
-    public List<java.util.Map<String, Object>> scoreStatusDist() {
-        return statMapper.scoreStatusDist();
+    /**
+     * 成绩状态分布：从成绩分片聚合，返回与旧接口相同的 List<Map<label,value>>。
+     */
+    public List<Map<String, Object>> scoreStatusDist() {
+        Map<String, Long> dist = scoreRepo.statusDist();
+        return dist.entrySet().stream()
+                .map(e -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("label", e.getKey());
+                    m.put("value", e.getValue());
+                    return m;
+                })
+                .collect(Collectors.toList());
     }
 }

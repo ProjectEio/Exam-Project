@@ -211,6 +211,37 @@ public class RegistrationShardRepository {
     public int           getNumShards()            { return templates.length; }
     public ShardRouter   getRouter()               { return router; }
 
+    /**
+     * 按计划聚合报名数，返回 planId → count。
+     * 供 StatisticsService 构建报名趋势图（按学期分组）。
+     */
+    @SuppressWarnings("unchecked")
+    public Map<Long, Long> countByPlanId() {
+        String key = "shard:rg:plan:cnt:all";
+        Map<Long, Long> hit = cache.get(CACHE, key);
+        if (hit != null) return hit;
+
+        List<CompletableFuture<List<Map<String, Object>>>> futures = new ArrayList<>();
+        for (JdbcTemplate tpl : templates) {
+            futures.add(CompletableFuture.supplyAsync(
+                    () -> tpl.queryForList(
+                            "SELECT plan_id, COUNT(*) AS cnt FROM sys_registration WHERE deleted=0 GROUP BY plan_id"),
+                    executor));
+        }
+        Map<Long, Long> merged = new LinkedHashMap<>();
+        for (CompletableFuture<List<Map<String, Object>>> f : futures) {
+            try {
+                for (Map<String, Object> row : f.get(30, TimeUnit.SECONDS)) {
+                    long planId = toLong(row.get("plan_id"));
+                    long cnt    = toLong(row.get("cnt"));
+                    merged.merge(planId, cnt, Long::sum);
+                }
+            } catch (Exception e) { log.warn("countByPlanId merge error: {}", e.getMessage()); }
+        }
+        cache.put(CACHE, key, merged);
+        return merged;
+    }
+
     // ════════════════════════════════════════════════════
     //  跨分片分页（管理后台）
     // ════════════════════════════════════════════════════

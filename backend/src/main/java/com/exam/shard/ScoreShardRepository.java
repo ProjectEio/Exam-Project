@@ -280,6 +280,79 @@ public class ScoreShardRepository {
     public int           getNumShards()            { return templates.length; }
     public ShardRouter   getRouter()               { return router; }
 
+    private long toLong(Object o) {
+        return o == null ? 0L : ((Number) o).longValue();
+    }
+
+    // ════════════════════════════════════════════════════
+    //  图表统计（走分片，供 StatisticsService 使用）
+    // ════════════════════════════════════════════════════
+
+    /**
+     * 按成绩状态聚合计数（PASS/FAIL/ABSENT）。
+     * 结果缓存在 SCORE_LIST_CACHE，TTL = 5 min。
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Long> statusDist() {
+        String key = "shard:sc:status:dist";
+        Map<String, Long> hit = cache.get(CACHE, key);
+        if (hit != null) return hit;
+
+        List<CompletableFuture<List<Map<String, Object>>>> futures = new ArrayList<>();
+        for (JdbcTemplate tpl : templates) {
+            futures.add(CompletableFuture.supplyAsync(
+                    () -> tpl.queryForList(
+                            "SELECT status, COUNT(*) AS cnt FROM sys_score WHERE deleted=0 GROUP BY status"),
+                    executor));
+        }
+        Map<String, Long> merged = new LinkedHashMap<>();
+        for (CompletableFuture<List<Map<String, Object>>> f : futures) {
+            try {
+                for (Map<String, Object> row : f.get(30, TimeUnit.SECONDS)) {
+                    String status = (String) row.get("status");
+                    if (status != null) merged.merge(status, toLong(row.get("cnt")), Long::sum);
+                }
+            } catch (Exception e) { log.warn("statusDist merge error: {}", e.getMessage()); }
+        }
+        cache.put(CACHE, key, merged);
+        return merged;
+    }
+
+    /**
+     * 按课程聚合总数与合格数，返回 courseId → [total, passCount]。
+     * 供 StatisticsService 计算课程合格率 Top10。
+     */
+    @SuppressWarnings("unchecked")
+    public Map<Long, long[]> coursePassStats() {
+        String key = "shard:sc:course:pass:stats";
+        Map<Long, long[]> hit = cache.get(CACHE, key);
+        if (hit != null) return hit;
+
+        List<CompletableFuture<List<Map<String, Object>>>> futures = new ArrayList<>();
+        for (JdbcTemplate tpl : templates) {
+            futures.add(CompletableFuture.supplyAsync(
+                    () -> tpl.queryForList(
+                            "SELECT course_id, COUNT(*) AS total, " +
+                            "SUM(CASE WHEN status='PASS' THEN 1 ELSE 0 END) AS pass " +
+                            "FROM sys_score WHERE deleted=0 GROUP BY course_id"),
+                    executor));
+        }
+        Map<Long, long[]> merged = new LinkedHashMap<>();
+        for (CompletableFuture<List<Map<String, Object>>> f : futures) {
+            try {
+                for (Map<String, Object> row : f.get(30, TimeUnit.SECONDS)) {
+                    long cid   = toLong(row.get("course_id"));
+                    long total = toLong(row.get("total"));
+                    long pass  = toLong(row.get("pass"));
+                    merged.merge(cid, new long[]{total, pass},
+                            (a, b) -> new long[]{a[0] + b[0], a[1] + b[1]});
+                }
+            } catch (Exception e) { log.warn("coursePassStats merge error: {}", e.getMessage()); }
+        }
+        cache.put(CACHE, key, merged);
+        return merged;
+    }
+
     // ════════════════════════════════════════════════════
     //  跨分片分页（管理后台）
     // ════════════════════════════════════════════════════
