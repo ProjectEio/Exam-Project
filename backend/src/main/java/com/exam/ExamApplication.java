@@ -9,6 +9,9 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 public class ExamApplication {
 
     public static void main(String[] args) {
+        // 确保 data/ 目录在 Spring 上下文初始化之前存在
+        try { java.nio.file.Files.createDirectories(java.nio.file.Paths.get("data")); }
+        catch (Exception ignored) {}
         SpringApplication.run(ExamApplication.class, args);
         System.out.println("\n=========================================");
         System.out.println("  省考试院自学考试计划管理系统已启动");

@@ -1,9 +1,12 @@
 package com.exam.config;
 
+import com.exam.benchmark.DataGeneratorService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.datasource.init.ScriptUtils;
 
@@ -18,26 +21,26 @@ import java.sql.Connection;
 /**
  * 数据库首次初始化器
  * ──────────────────────────────────────────────────────────
- * 策略：
- *   - 通过标志文件 exam.db.initialized 判断是否已初始化过
- *   - 只有当标志文件不存在时，才执行 schema.sql + data.sql
- *   - 执行完成后创建标志文件，防止重复初始化
+ * 策略（双标志文件）：
+ *   exam.db.initialized   → schema + seed data 已执行
+ *   exam.data.generated   → 2000 万分片数据已生成
  *
- * 好处：
- *   - 删掉标志文件即可触发重新初始化（无需修改代码）
- *   - 生产环境不会因为重启而意外清空数据
+ * 删除对应标志文件可触发重新执行对应阶段。
  */
 @Configuration
 public class DatabaseInitializer {
 
     private static final Logger log = LoggerFactory.getLogger(DatabaseInitializer.class);
 
-    /** 数据库目录 */
-    private static final String DATA_DIR    = "data";
-    /** 标志文件路径：放在 data/ 目录下 */
-    private static final String MARKER_FILE = DATA_DIR + "/exam.db.initialized";
+    private static final String DATA_DIR       = "data";
+    private static final String MARKER_SCHEMA  = DATA_DIR + "/exam.db.initialized";
+    private static final String MARKER_DATA    = DATA_DIR + "/exam.data.generated";
 
     private final DataSource dataSource;
+
+    @Lazy
+    @Autowired
+    private DataGeneratorService dataGeneratorService;
 
     @Value("${shard.base-path:./}")
     private String basePath;
@@ -48,47 +51,67 @@ public class DatabaseInitializer {
 
     @PostConstruct
     public void init() throws Exception {
-        Path marker = Paths.get(MARKER_FILE);
-
-        if (Files.exists(marker)) {
-            log.info("[DB Init] 标志文件已存在，跳过初始化（如需重置请删除 {}）", marker.toAbsolutePath());
-            return;
-        }
-
-        log.info("[DB Init] 首次启动，开始初始化数据库...");
-
         // ── 确保 data/ 目录存在 ────────────────────────────────
-        java.nio.file.Files.createDirectories(Paths.get(DATA_DIR));
+        Files.createDirectories(Paths.get(DATA_DIR));
 
-        // ── 删除旧数据库文件（保证干净起点）──────────────────────
-        deleteIfExists(DATA_DIR + "/exam.db");
-        deleteIfExists(DATA_DIR + "/exam.db-wal");
-        deleteIfExists(DATA_DIR + "/exam.db-shm");
-        // 分片文件（8 分片 × 2 表 = 16 个 .db）
-        for (int i = 0; i < 8; i++) {
-            deleteIfExists(basePath + "exam_score_"  + i + ".db");
-            deleteIfExists(basePath + "exam_score_"  + i + ".db-wal");
-            deleteIfExists(basePath + "exam_score_"  + i + ".db-shm");
-            deleteIfExists(basePath + "exam_reg_"    + i + ".db");
-            deleteIfExists(basePath + "exam_reg_"    + i + ".db-wal");
-            deleteIfExists(basePath + "exam_reg_"    + i + ".db-shm");
+        // ── 阶段 1：schema + seed data ─────────────────────────
+        Path schemaMarker = Paths.get(MARKER_SCHEMA);
+        if (Files.exists(schemaMarker)) {
+            log.info("[DB Init] schema 已初始化，跳过（删除 {} 可重置）", schemaMarker.toAbsolutePath());
+        } else {
+            log.info("[DB Init] 首次启动，执行 schema + seed data...");
+
+            // 删除旧 db 文件
+            deleteIfExists(DATA_DIR + "/exam.db");
+            deleteIfExists(DATA_DIR + "/exam.db-wal");
+            deleteIfExists(DATA_DIR + "/exam.db-shm");
+            for (int i = 0; i < 8; i++) {
+                deleteIfExists(basePath + "exam_score_" + i + ".db");
+                deleteIfExists(basePath + "exam_score_" + i + ".db-wal");
+                deleteIfExists(basePath + "exam_score_" + i + ".db-shm");
+                deleteIfExists(basePath + "exam_reg_"   + i + ".db");
+                deleteIfExists(basePath + "exam_reg_"   + i + ".db-wal");
+                deleteIfExists(basePath + "exam_reg_"   + i + ".db-shm");
+            }
+            // 同时清除数据标志（重建 schema 必须重新生成数据）
+            Files.deleteIfExists(Paths.get(MARKER_DATA));
+
+            try (Connection conn = dataSource.getConnection()) {
+                log.info("[DB Init] 执行 schema.sql ...");
+                ScriptUtils.executeSqlScript(conn, new ClassPathResource("db/schema.sql"));
+                log.info("[DB Init] 执行 data.sql ...");
+                ScriptUtils.executeSqlScript(conn, new ClassPathResource("db/data.sql"));
+            }
+
+            Files.writeString(schemaMarker, "initialized at " + java.time.LocalDateTime.now());
+            log.info("[DB Init] schema 初始化完成: {}", schemaMarker.toAbsolutePath());
         }
 
-        // ── 执行 schema + data ────────────────────────────────────
-        try (Connection conn = dataSource.getConnection()) {
-            log.info("[DB Init] 执行 schema.sql ...");
-            ScriptUtils.executeSqlScript(conn,
-                    new ClassPathResource("db/schema.sql"));
-
-            log.info("[DB Init] 执行 data.sql ...");
-            ScriptUtils.executeSqlScript(conn,
-                    new ClassPathResource("db/data.sql"));
+        // ── 阶段 2：2000 万分片数据（异步，后台生成）────────────
+        Path dataMarker = Paths.get(MARKER_DATA);
+        if (Files.exists(dataMarker)) {
+            log.info("[DB Init] 2000万数据已存在，跳过生成（删除 {} 可重新生成）", dataMarker.toAbsolutePath());
+        } else {
+            log.info("[DB Init] 启动后台 2000万数据生成任务...");
+            Thread genThread = new Thread(() -> {
+                try {
+                    log.info("===== [DataGen] 开始生成 Score 2000万 =====");
+                    dataGeneratorService.generateScores();
+                    log.info("===== [DataGen] 开始生成 Registration 2000万 =====");
+                    dataGeneratorService.generateRegistrations();
+                    // 写数据标志文件
+                    Files.writeString(Paths.get(MARKER_DATA),
+                            "generated at " + java.time.LocalDateTime.now()
+                            + "\nscores=" + dataGeneratorService.scoreInserted.get()
+                            + "\nregs="   + dataGeneratorService.regInserted.get());
+                    log.info("===== [DataGen] 全量数据生成完成，标志已写入 =====");
+                } catch (Exception e) {
+                    log.error("[DataGen] 数据生成失败", e);
+                }
+            }, "init-data-gen");
+            genThread.setDaemon(true);
+            genThread.start();
         }
-
-        // ── 写标志文件 ─────────────────────────────────────────────
-        Files.writeString(marker,
-                "initialized at " + java.time.LocalDateTime.now());
-        log.info("[DB Init] 初始化完成，标志文件已写入: {}", marker.toAbsolutePath());
     }
 
     private void deleteIfExists(String path) {
@@ -99,3 +122,5 @@ public class DatabaseInitializer {
         }
     }
 }
+
+
