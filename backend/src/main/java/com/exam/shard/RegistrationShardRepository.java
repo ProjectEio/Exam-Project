@@ -534,6 +534,8 @@ public class RegistrationShardRepository {
                     cache.invalidateAll(CACHE);
                     cache.invalidateAll(MemoryCacheManager.PAGE_CACHE);
                     refreshOverviewCounts();
+                    // 强制执行 WAL checkpoint，确保数据持久化并对后续跨分片聚合查询可见
+                    checkpointAll();
                     return true;
                 }
             } catch (Exception e) { log.warn("Registration updateStatus shard error: {}", e.getMessage()); }
@@ -553,6 +555,8 @@ public class RegistrationShardRepository {
                     cache.invalidateAll(CACHE);
                     cache.invalidateAll(MemoryCacheManager.PAGE_CACHE);
                     refreshOverviewCounts();
+                    // 删除后也进行 checkpoint
+                    checkpointAll();
                     return true;
                 }
             } catch (Exception e) { log.warn("Registration softDelete shard error: {}", e.getMessage()); }

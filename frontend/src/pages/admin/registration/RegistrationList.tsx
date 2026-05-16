@@ -68,9 +68,13 @@ export default function RegistrationList() {
     setActionLoadingId(id)
     try {
       await auditReg(id, 'APPROVED')
+      // 先本地乐观更新状态，保证 UI 立即响应
       applyAuditLocally(id, 'APPROVED')
       message.success('已通过')
-      await load(query)
+      // 稍微延迟拉取，确保后端缓存清理和分片数据库更新彻底对外可见
+      setTimeout(() => {
+        void load(query)
+      }, 300)
     } catch {
       message.error('审核失败')
     } finally {
@@ -91,7 +95,10 @@ export default function RegistrationList() {
       applyAuditLocally(rejectTarget.id, 'REJECTED')
       message.success('已拒绝')
       setRejectOpen(false)
-      await load(query)
+      // 稍微延迟拉取，确保后端状态同步
+      setTimeout(() => {
+        void load(query)
+      }, 300)
     } catch {
       message.error('审核失败')
     } finally {
