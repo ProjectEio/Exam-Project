@@ -66,11 +66,11 @@ public class RegistrationController {
     @Operation(summary = "审核 (APPROVED/REJECTED)")
     @RequireRole(Role.ADMIN)
     @PutMapping("/{id}/audit")
-    public R<Void> audit(@PathVariable Long id,
+    public R<Registration> audit(@PathVariable Long id,
                          @RequestParam String status,
                          @RequestParam(required = false) String remark) {
-        registrationService.audit(id, status, remark);
-        return R.ok(null, "审核完成");
+        Registration updated = registrationService.audit(id, status, remark);
+        return R.ok(updated, "审核完成");
     }
 
     @Operation(summary = "取消/删除")

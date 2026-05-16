@@ -64,17 +64,30 @@ export default function RegistrationList() {
     }
   }
 
+  const updateItemInList = (updated: Registration) => {
+    setData((prev) => {
+      // 如果当前是待审核筛选，且状态变了，则移除
+      if (query.status === 'PENDING' && updated.status !== 'PENDING') {
+        return prev.filter((item) => item.id !== updated.id)
+      }
+      return prev.map((item) => (item.id === updated.id ? updated : item))
+    })
+    if (query.status === 'PENDING' && updated.status !== 'PENDING') {
+      setTotal((prev) => Math.max(0, prev - 1))
+    }
+  }
+
   const onApprove = async (id: number) => {
     setActionLoadingId(id)
     try {
-      await auditReg(id, 'APPROVED')
-      // 先本地乐观更新状态，保证 UI 立即响应
-      applyAuditLocally(id, 'APPROVED')
+      const res = await auditReg(id, 'APPROVED')
+      // 使用后端返回的最新数据直接更新前端 State，实现“零延迟数据同步”
+      updateItemInList(res.data)
       message.success('已通过')
-      // 稍微延迟拉取，确保后端缓存清理和分片数据库更新彻底对外可见
+      // 仍然保留延迟 load 作为兜底，但即便 load 回来旧数据，UI 已经先一步更新成功了
       setTimeout(() => {
         void load(query)
-      }, 300)
+      }, 500)
     } catch {
       message.error('审核失败')
     } finally {
@@ -91,14 +104,14 @@ export default function RegistrationList() {
     if (!rejectTarget) return
     setActionLoadingId(rejectTarget.id)
     try {
-      await auditReg(rejectTarget.id, 'REJECTED', v.remark)
-      applyAuditLocally(rejectTarget.id, 'REJECTED')
+      const res = await auditReg(rejectTarget.id, 'REJECTED', v.remark)
+      updateItemInList(res.data)
       message.success('已拒绝')
       setRejectOpen(false)
       // 稍微延迟拉取，确保后端状态同步
       setTimeout(() => {
         void load(query)
-      }, 300)
+      }, 500)
     } catch {
       message.error('审核失败')
     } finally {

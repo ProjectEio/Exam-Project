@@ -1,6 +1,7 @@
 package com.exam.module.registration.service;
 
 import cn.hutool.core.util.StrUtil;
+import com.exam.cache.MemoryCacheManager;
 import com.exam.common.BizException;
 import com.exam.common.PageResult;
 import com.exam.common.UserContext;
@@ -31,6 +32,7 @@ public class RegistrationService {
     @Autowired private ExamPlanMapper             planMapper;
     @Autowired private CourseMapper               courseMapper;
     @Autowired private StatisticsService          statService;
+    @Autowired private UserShardRepository        userRepo;
     @Autowired private MemoryCacheManager         cacheManager;
 
     // ── 分页（admin 后台）─────────────────────────────────
@@ -56,7 +58,7 @@ public class RegistrationService {
     // ── 审核 ──────────────────────────────────────────────
 
     @Transactional
-    public void audit(Long id, String status, String remark) {
+    public Registration audit(Long id, String status, String remark) {
         if (!"APPROVED".equals(status) && !"REJECTED".equals(status)) {
             throw new BizException("审核状态非法");
         }
@@ -77,7 +79,7 @@ public class RegistrationService {
         }
         regRepo.updateStatus(id, status, remark, ticketNo, newPayment);
 
-        // 核心修复：确保在事务 Commit 成功后再清理缓存，防止并发请求将未提交的旧数据重新塞入缓存（缓存污染）
+        // 核心修复：确保在事务 Commit 成功后再清理缓存
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
@@ -90,6 +92,10 @@ public class RegistrationService {
             cacheManager.invalidateAll(MemoryCacheManager.REGISTRATION_CACHE);
             cacheManager.invalidateAll(MemoryCacheManager.PAGE_CACHE);
         }
+
+        // 返回更新后的最新对象，让前端可以不用重新 load 就更新 UI
+        Registration updated = regRepo.findById(id);
+        return updated;
     }
 
     // ── 取消 ──────────────────────────────────────────────

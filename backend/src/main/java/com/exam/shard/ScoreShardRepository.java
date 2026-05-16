@@ -12,6 +12,8 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import javax.sql.DataSource;
 import java.util.*;
@@ -273,7 +275,21 @@ public class ScoreShardRepository {
         int[] counts = templates[shardIdx].batchUpdate(
                 "INSERT OR IGNORE INTO sys_score(student_id,course_id,plan_id,exam_year,exam_term,score,status,exam_date,student_name,course_code,course_name) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                 rows);
+
+        // 收集受影响的 studentId 并批量清理缓存
+        Set<Long> studentIds = new HashSet<>();
+        for (Object[] row : rows) {
+            if (row != null && row.length > 0) {
+                studentIds.add(((Number) row[0]).longValue());
+            }
+        }
+        for (Long sid : studentIds) {
+            cache.remove(CACHE, "shard:sc:stu:" + sid);
+            cache.remove(CACHE, "shard:sc:cnt:" + sid);
+        }
+
         evictGlobalStats();
+        refreshOverviewCounts();
         return Arrays.stream(counts).sum();
     }
 
@@ -345,6 +361,19 @@ public class ScoreShardRepository {
     // ════════════════════════════════════════════════════
 
     private void evict(long studentId) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    doEvict(studentId);
+                }
+            });
+        } else {
+            doEvict(studentId);
+        }
+    }
+
+    private void doEvict(long studentId) {
         cache.remove(CACHE, "shard:sc:stu:" + studentId);
         cache.remove(CACHE, "shard:sc:cnt:" + studentId);
         evictGlobalStats();
