@@ -80,6 +80,12 @@ public class MemoryCacheManager {
         if (c != null) c.clear();
     }
 
+    /** 按前缀清空指定缓存 */
+    public void clearByPrefix(String cacheName, String prefix) {
+        MemoryCache<String, Object> c = caches.get(cacheName);
+        if (c != null) c.clearByPrefix(prefix);
+    }
+
     /** 清空所有缓存 */
     public void invalidateAllCaches() {
         caches.values().forEach(MemoryCache::clear);

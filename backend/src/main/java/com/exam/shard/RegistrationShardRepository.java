@@ -31,6 +31,7 @@ import java.util.concurrent.*;
 @Repository
 public class RegistrationShardRepository {
 
+    private static final long PUBLIC_ID_FACTOR = 1_000_000_000L;
     private static final long GENERATED_BASE_STUDENT_ID = 1_000_000L;
     private static final int GENERATED_STUDENT_COUNT = 100_000;
     private static final int GENERATED_ROWS_PER_STUDENT = 200;
@@ -428,9 +429,14 @@ public class RegistrationShardRepository {
 
         List<CompletableFuture<List<Registration>>> dataFutures = new ArrayList<>();
         for (int s : shards) {
-            JdbcTemplate tpl = templates[s];
+            final int shardIdx = s;
+            JdbcTemplate tpl = templates[shardIdx];
             dataFutures.add(CompletableFuture.supplyAsync(
-                    () -> tpl.query(dataSql, REG_ROW_MAPPER, dataArr),
+                    () -> {
+                        List<Registration> rows = tpl.query(dataSql, REG_ROW_MAPPER, dataArr);
+                        applyPublicIds(rows, shardIdx);
+                        return rows;
+                    },
                     executor));
         }
         List<Registration> merged = new ArrayList<>();
@@ -438,10 +444,11 @@ public class RegistrationShardRepository {
             try { merged.addAll(f.get(30, TimeUnit.SECONDS)); }
             catch (Exception e) { log.warn("Registration page merge failed: {}", e.getMessage()); }
         }
-        merged.sort((a, b) -> Long.compare(b.getId(), a.getId()));
+        merged.sort((a, b) -> Long.compare(rawIdOf(b.getId()), rawIdOf(a.getId())));
         int from = Math.min((pageNum - 1) * pageSize, merged.size());
         int to   = Math.min(from + pageSize, merged.size());
-        return PageResult.of(new ArrayList<>(merged.subList(from, to)), total, pageNum, pageSize);
+        List<Registration> page = new ArrayList<>(merged.subList(from, to));
+        return PageResult.of(page, total, pageNum, pageSize);
     }
 
     private PageResult<Registration> fastPageNoFilter(int pageNum, int pageSize, long total) {
@@ -467,6 +474,7 @@ public class RegistrationShardRepository {
             }
             cursor += GENERATED_ROWS_PER_STUDENT - withinStudent;
         }
+        applyPublicIds(records);
         return PageResult.of(records, total, pageNum, pageSize);
     }
 
@@ -483,10 +491,12 @@ public class RegistrationShardRepository {
         }
         merged.sort(Comparator.comparing(Registration::getStudentId, Comparator.nullsLast(Long::compareTo)).reversed()
                 .thenComparing(Registration::getPlanId, Comparator.nullsLast(Long::compareTo)).reversed()
-                .thenComparing(Registration::getId, Comparator.nullsLast(Long::compareTo)).reversed());
+            .thenComparing(r -> rawIdOf(r.getId()), Comparator.nullsLast(Long::compareTo)).reversed());
         int from = (int) Math.min(tailOffset, merged.size());
         int to = Math.min(from + pageSize, merged.size());
-        return PageResult.of(from < to ? new ArrayList<>(merged.subList(from, to)) : Collections.emptyList(), total, pageNum, pageSize);
+        List<Registration> page = from < to ? new ArrayList<>(merged.subList(from, to)) : Collections.emptyList();
+        applyPublicIds(page);
+        return PageResult.of(page, total, pageNum, pageSize);
     }
 
     private long toLong(Object o) {
@@ -499,9 +509,32 @@ public class RegistrationShardRepository {
 
     public List<Registration> listByStudent(long studentId) {
         int shard = router.route(studentId);
-        return templates[shard].query(
+        List<Registration> rows = templates[shard].query(
                 "SELECT " + REG_SELECT_COLS + " FROM sys_registration WHERE student_id=? AND deleted=0 ORDER BY id DESC",
                 REG_ROW_MAPPER, studentId);
+        applyPublicIds(rows, shard);
+        return rows;
+    }
+
+    public Registration findByStudentAndId(Long id, Long studentId) {
+        if (id == null || studentId == null) return null;
+        int shardIdx = router.route(studentId);
+        long localId = rawIdOf(id);
+        try {
+            List<Registration> rows = templates[shardIdx].query(
+                    "SELECT " + REG_SELECT_COLS + " FROM sys_registration WHERE student_id=? AND id=? AND deleted=0 LIMIT 1",
+                    REG_ROW_MAPPER,
+                    studentId,
+                    localId);
+            if (!rows.isEmpty()) {
+                Registration hit = rows.get(0);
+                hit.setId(toPublicId(shardIdx, hit.getId()));
+                return hit;
+            }
+        } catch (Exception e) {
+            log.warn("Registration findByStudentAndId shard error: {}", e.getMessage());
+        }
+        return null;
     }
 
     /**
@@ -509,12 +542,34 @@ public class RegistrationShardRepository {
      * 因分片 key 是 student_id，id 可能分布在任意分片，需扫描全部。
      */
     public Registration findById(Long id) {
+        ShardKey shardKey = decodeShardKey(id);
+        if (shardKey != null) {
+            try {
+                List<Registration> rows = templates[shardKey.shardIdx].query(
+                        "SELECT " + REG_SELECT_COLS + " FROM sys_registration WHERE id=? AND deleted=0 LIMIT 1",
+                        REG_ROW_MAPPER,
+                        shardKey.localId);
+                if (!rows.isEmpty()) {
+                    Registration hit = rows.get(0);
+                    hit.setId(id);
+                    return hit;
+                }
+            } catch (Exception e) {
+                log.warn("Registration findById precise shard error: {}", e.getMessage());
+            }
+        }
+
         String sql = "SELECT " + REG_SELECT_COLS
                 + " FROM sys_registration WHERE id=? AND deleted=0 LIMIT 1";
-        for (JdbcTemplate tpl : templates) {
+        for (int shardIdx = 0; shardIdx < templates.length; shardIdx++) {
+            JdbcTemplate tpl = templates[shardIdx];
             try {
                 List<Registration> rows = tpl.query(sql, REG_ROW_MAPPER, id);
-                if (!rows.isEmpty()) return rows.get(0);
+                if (!rows.isEmpty()) {
+                    Registration hit = rows.get(0);
+                    hit.setId(toPublicId(shardIdx, hit.getId()));
+                    return hit;
+                }
             } catch (Exception e) { log.warn("Registration findById shard error: {}", e.getMessage()); }
         }
         return null;
@@ -525,14 +580,44 @@ public class RegistrationShardRepository {
      */
     public boolean updateStatus(Long id, String status, String remark,
                                 String admissionTicketNo, String paymentStatus) {
+        return updateStatus(id, null, status, remark, admissionTicketNo, paymentStatus);
+    }
+
+    public boolean updateStatus(Long id, Long studentId, String status, String remark,
+                                String admissionTicketNo, String paymentStatus) {
         String sql = "UPDATE sys_registration SET status=?,audit_remark=?,"
             + "admission_ticket_no=?,payment_status=?,update_time=datetime('now') WHERE id=? AND deleted=0";
+
+        Registration old = studentId != null ? findByStudentAndId(id, studentId) : findById(id);
+        ShardKey shardKey = decodeShardKey(id, studentId);
+
+        if (shardKey != null) {
+            try {
+                int affected = templates[shardKey.shardIdx].update(sql, status, remark, admissionTicketNo, paymentStatus, shardKey.localId);
+                if (affected > 0) {
+                    if (old != null && old.getStudentId() != null) {
+                        evict(old.getStudentId());
+                    } else {
+                        cache.invalidateAll(MemoryCacheManager.PAGE_CACHE);
+                    }
+
+                    refreshOverviewCounts();
+                    checkpointAll();
+                    return true;
+                }
+            } catch (Exception e) { log.warn("Registration updateStatus precise shard error: {}", e.getMessage()); }
+        }
+
         for (JdbcTemplate tpl : templates) {
             try {
                 int affected = tpl.update(sql, status, remark, admissionTicketNo, paymentStatus, id);
                 if (affected > 0) {
+                    if (old != null && old.getStudentId() != null) {
+                        evict(old.getStudentId());
+                    } else {
+                        cache.invalidateAll(MemoryCacheManager.PAGE_CACHE);
+                    }
                     refreshOverviewCounts();
-                    // 写操作后立即 Checkpoint
                     checkpointAll();
                     return true;
                 }
@@ -545,13 +630,42 @@ public class RegistrationShardRepository {
      * 软删除（fan-out）。
      */
     public boolean softDelete(Long id) {
+        return softDelete(id, null);
+    }
+
+    public boolean softDelete(Long id, Long studentId) {
+        Registration old = studentId != null ? findByStudentAndId(id, studentId) : findById(id);
+        ShardKey shardKey = decodeShardKey(id, studentId);
+
+        if (shardKey != null) {
+            try {
+                int affected = templates[shardKey.shardIdx].update(
+                        "UPDATE sys_registration SET deleted=1,update_time=datetime('now') WHERE id=? AND deleted=0", shardKey.localId);
+                if (affected > 0) {
+                    if (old != null && old.getStudentId() != null) {
+                        evict(old.getStudentId());
+                    } else {
+                        cache.invalidateAll(MemoryCacheManager.PAGE_CACHE);
+                    }
+                    refreshOverviewCounts();
+                    // 删除后也进行 checkpoint
+                    checkpointAll();
+                    return true;
+                }
+            } catch (Exception e) { log.warn("Registration softDelete precise shard error: {}", e.getMessage()); }
+        }
+
         for (JdbcTemplate tpl : templates) {
             try {
                 int affected = tpl.update(
                         "UPDATE sys_registration SET deleted=1,update_time=datetime('now') WHERE id=? AND deleted=0", id);
                 if (affected > 0) {
+                    if (old != null && old.getStudentId() != null) {
+                        evict(old.getStudentId());
+                    } else {
+                        cache.invalidateAll(MemoryCacheManager.PAGE_CACHE);
+                    }
                     refreshOverviewCounts();
-                    // 删除后也进行 checkpoint
                     checkpointAll();
                     return true;
                 }
@@ -559,6 +673,50 @@ public class RegistrationShardRepository {
         }
         return false;
     }
+
+    private void applyPublicIds(List<Registration> rows) {
+        if (rows == null || rows.isEmpty()) return;
+        for (Registration row : rows) {
+            if (row == null || row.getStudentId() == null || row.getId() == null || decodeShardKey(row.getId()) != null) continue;
+            int shardIdx = router.route(row.getStudentId());
+            row.setId(toPublicId(shardIdx, row.getId()));
+        }
+    }
+
+    private void applyPublicIds(List<Registration> rows, int shardIdx) {
+        if (rows == null || rows.isEmpty()) return;
+        for (Registration row : rows) {
+            if (row == null || row.getId() == null || decodeShardKey(row.getId()) != null) continue;
+            row.setId(toPublicId(shardIdx, row.getId()));
+        }
+    }
+
+    private long toPublicId(int shardIdx, Long localId) {
+        return (long) (shardIdx + 1) * PUBLIC_ID_FACTOR + localId;
+    }
+
+    private long rawIdOf(Long id) {
+        if (id == null) return 0L;
+        ShardKey shardKey = decodeShardKey(id);
+        return shardKey != null ? shardKey.localId : id;
+    }
+
+    private ShardKey decodeShardKey(Long publicId) {
+        if (publicId == null || publicId < PUBLIC_ID_FACTOR) return null;
+        int shardIdx = (int) (publicId / PUBLIC_ID_FACTOR) - 1;
+        long localId = publicId % PUBLIC_ID_FACTOR;
+        if (shardIdx < 0 || shardIdx >= templates.length || localId <= 0) return null;
+        return new ShardKey(shardIdx, localId);
+    }
+
+    private ShardKey decodeShardKey(Long publicId, Long studentId) {
+        ShardKey shardKey = decodeShardKey(publicId);
+        if (shardKey != null) return shardKey;
+        if (publicId == null || publicId <= 0 || studentId == null) return null;
+        return new ShardKey(router.route(studentId), publicId);
+    }
+
+    private record ShardKey(int shardIdx, long localId) {}
 
     private long parallelSumCacheTable(String cacheKey) {
         String sql = "SELECT COALESCE((SELECT value FROM shard_count_cache WHERE key='" + cacheKey + "'),0)";

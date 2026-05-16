@@ -64,27 +64,28 @@ export default function RegistrationList() {
     }
   }
 
-  const updateItemInList = (updated: Registration) => {
+  const updateItemInList = (sourceId: number, updated: Registration) => {
     setData((prev) => {
-      // 如果当前是待审核筛选，且状态变了，则移除
       if (query.status === 'PENDING' && updated.status !== 'PENDING') {
-        return prev.filter((item) => item.id !== updated.id)
+        return prev.filter((item) => item.id !== sourceId && item.id !== updated.id)
       }
-      return prev.map((item) => (item.id === updated.id ? updated : item))
+      return prev.map((item) => (
+        item.id === sourceId || item.id === updated.id || item.registrationNo === updated.registrationNo
+          ? updated
+          : item
+      ))
     })
     if (query.status === 'PENDING' && updated.status !== 'PENDING') {
       setTotal((prev) => Math.max(0, prev - 1))
     }
   }
 
-  const onApprove = async (id: number) => {
-    setActionLoadingId(id)
+  const onApprove = async (record: Registration) => {
+    setActionLoadingId(record.id)
     try {
-      const res = await auditReg(id, 'APPROVED')
-      // 使用后端返回的最新数据直接更新前端 State，实现“零延迟数据同步”
-      updateItemInList(res.data)
+      const res = await auditReg(record.id, 'APPROVED', undefined, record.studentId)
+      updateItemInList(record.id, res.data)
       message.success('已通过')
-      // 仍然保留延迟 load 作为兜底，但即便 load 回来旧数据，UI 已经先一步更新成功了
       setTimeout(() => {
         void load(query)
       }, 500)
@@ -104,11 +105,10 @@ export default function RegistrationList() {
     if (!rejectTarget) return
     setActionLoadingId(rejectTarget.id)
     try {
-      const res = await auditReg(rejectTarget.id, 'REJECTED', v.remark)
-      updateItemInList(res.data)
+      const res = await auditReg(rejectTarget.id, 'REJECTED', v.remark, rejectTarget.studentId)
+      updateItemInList(rejectTarget.id, res.data)
       message.success('已拒绝')
       setRejectOpen(false)
-      // 稍微延迟拉取，确保后端状态同步
       setTimeout(() => {
         void load(query)
       }, 500)
@@ -118,8 +118,8 @@ export default function RegistrationList() {
       setActionLoadingId(null)
     }
   }
-  const onCancel = async (id: number) => {
-    await cancelReg(id)
+  const onCancel = async (record: Registration) => {
+    await cancelReg(record.id, record.studentId)
     message.success('已取消')
     load()
   }
@@ -147,8 +147,8 @@ export default function RegistrationList() {
       })
       .catch(() => message.error('导出失败'))
   }
-  const onTicket = (id: number) => {
-    ticketFile(id)
+  const onTicket = (record: Registration) => {
+    ticketFile(record.id, record.studentId)
       .then((resp) => {
         const blob = resp.data as Blob
         const url = URL.createObjectURL(blob)
@@ -185,14 +185,14 @@ export default function RegistrationList() {
         <Space wrap>
           {r.status === 'PENDING' && (
             <>
-              <Button size="small" type="primary" icon={<CheckOutlined />} loading={actionLoadingId === r.id} onClick={() => onApprove(r.id)}>通过</Button>
+              <Button size="small" type="primary" icon={<CheckOutlined />} loading={actionLoadingId === r.id} onClick={() => onApprove(r)}>通过</Button>
               <Button size="small" danger icon={<CloseOutlined />} disabled={actionLoadingId === r.id} onClick={() => onRejectOpen(r)}>拒绝</Button>
             </>
           )}
           {r.status === 'APPROVED' && (
-            <Button size="small" icon={<DownloadOutlined />} onClick={() => onTicket(r.id)}>准考证</Button>
+            <Button size="small" icon={<DownloadOutlined />} onClick={() => onTicket(r)}>准考证</Button>
           )}
-          <Popconfirm title="确认取消该报名？" onConfirm={() => onCancel(r.id)}>
+          <Popconfirm title="确认取消该报名？" onConfirm={() => onCancel(r)}>
             <Button size="small" danger>取消</Button>
           </Popconfirm>
         </Space>

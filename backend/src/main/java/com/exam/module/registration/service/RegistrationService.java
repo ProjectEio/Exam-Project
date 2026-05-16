@@ -44,7 +44,11 @@ public class RegistrationService {
     // ── 详情（admin / 学生）──────────────────────────────
 
     public Registration detail(Long id) {
-        Registration r = regRepo.findById(id);
+        return detail(id, null);
+    }
+
+    public Registration detail(Long id, Long studentId) {
+        Registration r = studentId == null ? regRepo.findById(id) : regRepo.findByStudentAndId(id, studentId);
         if (r == null) throw new BizException("报名记录不存在");
         return r;
     }
@@ -59,10 +63,15 @@ public class RegistrationService {
 
     @Transactional
     public Registration audit(Long id, String status, String remark) {
+        return audit(id, null, status, remark);
+    }
+
+    @Transactional
+    public Registration audit(Long id, Long studentId, String status, String remark) {
         if (!"APPROVED".equals(status) && !"REJECTED".equals(status)) {
             throw new BizException("审核状态非法");
         }
-        Registration old = regRepo.findById(id);
+        Registration old = studentId == null ? regRepo.findById(id) : regRepo.findByStudentAndId(id, studentId);
         if (old == null) throw new BizException("报名记录不存在");
 
         String newPayment = "APPROVED".equals(status) ? "PAID" : old.getPaymentStatus();
@@ -77,7 +86,7 @@ public class RegistrationService {
                     .setSql("registered_count = MAX(registered_count - 1, 0)")
                     .eq(ExamPlan::getId, old.getPlanId()));
         }
-        regRepo.updateStatus(id, status, remark, ticketNo, newPayment);
+        regRepo.updateStatus(id, studentId, status, remark, ticketNo, newPayment);
 
         // 核心修复：确保在事务 Commit 成功后再清理缓存
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
@@ -94,7 +103,7 @@ public class RegistrationService {
         }
 
         // 返回更新后的最新对象，让前端可以不用重新 load 就更新 UI
-        Registration updated = regRepo.findById(id);
+        Registration updated = studentId == null ? regRepo.findById(id) : regRepo.findByStudentAndId(id, studentId);
         return updated;
     }
 
@@ -102,13 +111,18 @@ public class RegistrationService {
 
     @Transactional
     public void cancel(Long id) {
-        Registration r = regRepo.findById(id);
+        cancel(id, null);
+    }
+
+    @Transactional
+    public void cancel(Long id, Long studentId) {
+        Registration r = studentId == null ? regRepo.findById(id) : regRepo.findByStudentAndId(id, studentId);
         if (r == null) throw new BizException("报名记录不存在");
         if (UserContext.isStudent() && !r.getStudentId().equals(UserContext.userId())) {
             throw new BizException("无权取消他人报名");
         }
 
-        regRepo.softDelete(id);
+        regRepo.softDelete(id, studentId);
         planMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<ExamPlan>()
                 .setSql("registered_count = MAX(registered_count - 1, 0)")
                 .eq(ExamPlan::getId, r.getPlanId()));

@@ -80,12 +80,12 @@ public class CourseService {
         } else {
             courseMapper.updateById(course);
         }
-        cacheManager.invalidateAll(MemoryCacheManager.PAGE_CACHE);
+        clearCourseCaches();
     }
 
     public void delete(Long id) {
         courseMapper.deleteById(id);
-        cacheManager.invalidateAll(MemoryCacheManager.PAGE_CACHE);
+        clearCourseCaches();
     }
 
     /**
@@ -95,8 +95,14 @@ public class CourseService {
     public int batchDelete(List<Long> ids) {
         if (ids == null || ids.isEmpty()) return 0;
         int deleted = courseMapper.deleteByIds(ids);
-        cacheManager.invalidateAll(MemoryCacheManager.PAGE_CACHE);
+        clearCourseCaches();
         return deleted;
+    }
+
+    private void clearCourseCaches() {
+        cacheManager.invalidateAll(MemoryCacheManager.PAGE_CACHE);
+        // 清理业务相关的缓存前缀
+        cacheManager.clearByPrefix(MemoryCacheManager.PAGE_CACHE, BY_MAJOR_KEY_PREFIX);
     }
 
     /**
@@ -118,7 +124,7 @@ public class CourseService {
                 majorCourseMapper.insert(mc);
             }
         }
-        cacheManager.invalidateAll(MemoryCacheManager.PAGE_CACHE);
+        clearCourseCaches();
     }
 
     public List<MajorCourse> majorCourses(Long majorId) {

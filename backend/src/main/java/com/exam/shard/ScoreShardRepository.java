@@ -283,13 +283,24 @@ public class ScoreShardRepository {
                 studentIds.add(((Number) row[0]).longValue());
             }
         }
-        for (Long sid : studentIds) {
-            cache.remove(CACHE, "shard:sc:stu:" + sid);
-            cache.remove(CACHE, "shard:sc:cnt:" + sid);
+        
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    for (Long sid : studentIds) {
+                        doEvict(sid);
+                    }
+                    refreshOverviewCounts();
+                }
+            });
+        } else {
+            for (Long sid : studentIds) {
+                doEvict(sid);
+            }
+            refreshOverviewCounts();
         }
-
-        evictGlobalStats();
-        refreshOverviewCounts();
+        
         return Arrays.stream(counts).sum();
     }
 
@@ -301,7 +312,7 @@ public class ScoreShardRepository {
                 score.getStudentId(), score.getCourseId(), score.getPlanId(), score.getExamYear(), score.getExamTerm(),
                 score.getScore(), score.getStatus(), score.getExamDate(), score.getStudentName(), score.getCourseCode(), score.getCourseName());
         evict(score.getStudentId());
-        refreshOverviewCounts();
+        syncRefreshOverviewCounts();
     }
 
     public int delete(long studentId, long scoreId) {
@@ -310,7 +321,7 @@ public class ScoreShardRepository {
                 "UPDATE sys_score SET deleted=1 WHERE id=? AND student_id=?", scoreId, studentId);
         if (affected > 0) {
             evict(studentId);
-            refreshOverviewCounts();
+            syncRefreshOverviewCounts();
         }
         return affected;
     }
@@ -328,7 +339,7 @@ public class ScoreShardRepository {
         if (!Objects.equals(old.getStudentId(), score.getStudentId()) && score.getStudentId() != null) {
             evict(score.getStudentId());
         }
-        refreshOverviewCounts();
+        syncRefreshOverviewCounts();
     }
 
     public void upsertByUniqueKey(Score score) {
@@ -344,9 +355,22 @@ public class ScoreShardRepository {
                     score.getScore(), score.getStatus(), score.getExamDate(), score.getPlanId(), score.getStudentName(), score.getCourseCode(), score.getCourseName(),
                     score.getStudentId(), score.getCourseId(), score.getExamYear(), score.getExamTerm());
             evict(score.getStudentId());
-            refreshOverviewCounts();
+            syncRefreshOverviewCounts();
         } else {
                 insert(score);
+        }
+    }
+
+    private void syncRefreshOverviewCounts() {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    refreshOverviewCounts();
+                }
+            });
+        } else {
+            refreshOverviewCounts();
         }
     }
 

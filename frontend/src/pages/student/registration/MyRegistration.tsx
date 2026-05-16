@@ -52,9 +52,9 @@ export default function MyRegistration() {
     load()
   }, [])
 
-  const handleDownload = async (id: number) => {
+  const handleDownload = async (record: Registration) => {
     try {
-      const resp = await ticketFile(id)
+      const resp = await ticketFile(record.id, record.studentId)
       const blob = resp.data as Blob
       const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
@@ -70,9 +70,9 @@ export default function MyRegistration() {
     }
   }
 
-  const handleCancel = async (id: number) => {
+  const handleCancel = async (record: Registration) => {
     try {
-      await cancelReg(id)
+      await cancelReg(record.id, record.studentId)
       message.success('已取消报名')
       await load()
     } catch {
@@ -149,7 +149,7 @@ export default function MyRegistration() {
             type="link"
             icon={<DownloadOutlined />}
             disabled={r.status !== 'APPROVED'}
-            onClick={() => handleDownload(r.id)}
+            onClick={() => handleDownload(r)}
           >
             准考证
           </Button>
@@ -159,7 +159,7 @@ export default function MyRegistration() {
               description="取消后报名记录将被删除，需重新提交"
               okText="确认"
               cancelText="再想想"
-              onConfirm={() => handleCancel(r.id)}
+              onConfirm={() => handleCancel(r)}
             >
               <Button type="link" danger icon={<CloseCircleOutlined />}>
                 取消

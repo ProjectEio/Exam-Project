@@ -53,8 +53,9 @@ public class RegistrationController {
 
     @Operation(summary = "详情")
     @GetMapping("/{id}")
-    public R<Registration> detail(@PathVariable Long id) {
-        return R.ok(registrationService.detail(id));
+    public R<Registration> detail(@PathVariable Long id,
+                                  @RequestParam(required = false) Long studentId) {
+        return R.ok(registrationService.detail(id, studentId));
     }
 
     @Operation(summary = "考生报名")
@@ -67,23 +68,27 @@ public class RegistrationController {
     @RequireRole(Role.ADMIN)
     @PutMapping("/{id}/audit")
     public R<Registration> audit(@PathVariable Long id,
+                         @RequestParam(required = false) Long studentId,
                          @RequestParam String status,
                          @RequestParam(required = false) String remark) {
-        Registration updated = registrationService.audit(id, status, remark);
+        Registration updated = registrationService.audit(id, studentId, status, remark);
         return R.ok(updated, "审核完成");
     }
 
     @Operation(summary = "取消/删除")
     @DeleteMapping("/{id}")
-    public R<Void> cancel(@PathVariable Long id) {
-        registrationService.cancel(id);
+    public R<Void> cancel(@PathVariable Long id,
+                          @RequestParam(required = false) Long studentId) {
+        registrationService.cancel(id, studentId);
         return R.ok(null, "已取消");
     }
 
     @Operation(summary = "下载准考证 PDF")
     @GetMapping("/{id}/ticket")
-    public void downloadTicket(@PathVariable Long id, HttpServletResponse response) throws Exception {
-        ticketPdfService.exportTicket(id, response);
+    public void downloadTicket(@PathVariable Long id,
+                               @RequestParam(required = false) Long studentId,
+                               HttpServletResponse response) throws Exception {
+        ticketPdfService.exportTicket(studentId == null ? id : registrationService.detail(id, studentId).getId(), response);
     }
 
     @Operation(summary = "导出报名 Excel")

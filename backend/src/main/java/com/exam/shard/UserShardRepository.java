@@ -12,6 +12,8 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import javax.sql.DataSource;
 import java.util.ArrayList;
@@ -412,11 +414,18 @@ public class UserShardRepository {
                 user.getId(), user.getUsername(), user.getPassword(), user.getRole(),
                 user.getRealName(), user.getIdCard(), user.getPhone(), user.getEmail(),
                 user.getGender(), user.getStatus() == null ? 1 : user.getStatus());
-        // 清除存在性缓存
-        cache.remove(MemoryCacheManager.USER_CACHE, "u:exists:" + user.getUsername());
-        evictUserCountCaches();
-        cache.invalidateAll(MemoryCacheManager.PAGE_CACHE);
-        refreshOverviewCounts();
+
+        executeAfterCommit(() -> {
+            // 清除存在性缓存
+            cache.remove(MemoryCacheManager.USER_CACHE, "u:exists:" + user.getUsername());
+            // 清除按用户名查询的缓存
+            cache.remove(MemoryCacheManager.USER_CACHE, "u:name:" + user.getUsername());
+            cache.remove(MemoryCacheManager.USER_CACHE, "u:npwd:" + user.getUsername());
+            
+            evictUserCountCaches();
+            cache.invalidateAll(MemoryCacheManager.PAGE_CACHE);
+            refreshOverviewCounts();
+        });
     }
 
     /** 更新用户信息 */
@@ -433,21 +442,54 @@ public class UserShardRepository {
                     "UPDATE sys_user SET password=? WHERE id=? AND deleted=0",
                     user.getPassword(), user.getId());
         }
-        // 清除缓存
-        cache.remove(MemoryCacheManager.USER_CACHE, "u:id:" + user.getId());
-        evictUserCountCaches();
-        cache.invalidateAll(MemoryCacheManager.PAGE_CACHE);
-        refreshOverviewCounts();
+
+        executeAfterCommit(() -> {
+            // 清除缓存
+            cache.remove(MemoryCacheManager.USER_CACHE, "u:id:" + user.getId());
+            // 虽然目前 update 不支持修改 username，但这里清除 username 相关缓存以防万一
+            if (user.getUsername() != null) {
+                cache.remove(MemoryCacheManager.USER_CACHE, "u:name:" + user.getUsername());
+                cache.remove(MemoryCacheManager.USER_CACHE, "u:npwd:" + user.getUsername());
+            }
+            
+            evictUserCountCaches();
+            cache.invalidateAll(MemoryCacheManager.PAGE_CACHE);
+            refreshOverviewCounts();
+        });
     }
 
     /** 软删除 */
     public void deleteById(long id) {
+        // 先查出用户名，以便清理相关缓存
+        User user = findById(id);
+        
         shards[router.route(id)].update(
                 "UPDATE sys_user SET deleted=1 WHERE id=?", id);
-        cache.remove(MemoryCacheManager.USER_CACHE, "u:id:" + id);
-        evictUserCountCaches();
-        cache.invalidateAll(MemoryCacheManager.PAGE_CACHE);
-        refreshOverviewCounts();
+
+        executeAfterCommit(() -> {
+            cache.remove(MemoryCacheManager.USER_CACHE, "u:id:" + id);
+            if (user != null) {
+                cache.remove(MemoryCacheManager.USER_CACHE, "u:exists:" + user.getUsername());
+                cache.remove(MemoryCacheManager.USER_CACHE, "u:name:" + user.getUsername());
+                cache.remove(MemoryCacheManager.USER_CACHE, "u:npwd:" + user.getUsername());
+            }
+            evictUserCountCaches();
+            cache.invalidateAll(MemoryCacheManager.PAGE_CACHE);
+            refreshOverviewCounts();
+        });
+    }
+
+    private void executeAfterCommit(Runnable task) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    task.run();
+                }
+            });
+        } else {
+            task.run();
+        }
     }
 
     private void evictUserCountCaches() {

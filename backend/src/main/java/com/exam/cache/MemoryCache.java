@@ -74,6 +74,11 @@ public class MemoryCache<K, V> {
         for (Segment<K, V> seg : segments) seg.clear();
     }
 
+    /** 按前缀清空缓存（仅支持 K 为 String 类型） */
+    public void clearByPrefix(String prefix) {
+        for (Segment<K, V> seg : segments) seg.clearByPrefix(prefix);
+    }
+
     // ────────────────── 统计 ──────────────────
 
     public String getName()         { return name; }
@@ -146,6 +151,15 @@ public class MemoryCache<K, V> {
             lock.lock();
             try { map.remove(key); }
             finally { lock.unlock(); }
+        }
+
+        void clearByPrefix(String prefix) {
+            lock.lock();
+            try {
+                map.keySet().removeIf(k -> k instanceof String && ((String) k).startsWith(prefix));
+            } finally {
+                lock.unlock();
+            }
         }
 
         void clear() {
