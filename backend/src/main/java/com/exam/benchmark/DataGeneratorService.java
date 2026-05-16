@@ -1,6 +1,7 @@
 package com.exam.benchmark;
 
 import com.exam.module.statistics.repository.OverviewCountRepository;
+import com.exam.module.statistics.service.StatisticsService;
 import com.exam.shard.RegistrationShardRepository;
 import com.exam.shard.ScoreShardRepository;
 import com.exam.shard.ShardDataSourceConfig;
@@ -59,6 +60,7 @@ public class DataGeneratorService {
     @Autowired private RegistrationShardRepository regRepo;
     @Autowired private UserShardRepository         userRepo;
     @Autowired private OverviewCountRepository     overviewCountRepo;
+    @Autowired private StatisticsService           statisticsService;
 
     /** 用户分片数据源（generateUsers 直接批量写入，绕过 ORM 开销） */
     @Autowired
@@ -268,6 +270,7 @@ public class DataGeneratorService {
         overviewCountRepo.refreshScoreCounts(
                 toLong(scoreStats.get("totalCount")),
                 toLong(scoreStats.get("passCount")));
+        statisticsService.refreshCoursePassRateCache();
         log.info("Score 生成完成，共写入 {} 条", total);
     }
 
@@ -383,6 +386,7 @@ public class DataGeneratorService {
         overviewCountRepo.refreshRegistrationCounts(
             toLong(regStats.get("totalCount")),
             toLong(regStats.get("approvedCount")));
+        statisticsService.refreshRegistrationTrendCache();
         log.info("Registration 生成完成，共写入 {} 条", total);
     }
 

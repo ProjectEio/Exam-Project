@@ -3,6 +3,7 @@ package com.exam.module.statistics.service;
 import com.exam.module.statistics.dto.ChartItem;
 import com.exam.module.statistics.dto.OverviewVO;
 import com.exam.module.statistics.mapper.StatisticsMapper;
+import com.exam.module.statistics.repository.StatisticsChartCacheRepository;
 import com.exam.module.statistics.repository.OverviewCountRepository;
 import com.exam.module.course.mapper.CourseMapper;
 import com.exam.module.plan.mapper.ExamPlanMapper;
@@ -17,11 +18,8 @@ import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
-import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.stream.Collectors;
 
 @Service
 public class StatisticsService {
@@ -32,6 +30,7 @@ public class StatisticsService {
 
     @Autowired private StatisticsMapper            statMapper;
     @Autowired private OverviewCountRepository     overviewCountRepo;
+    @Autowired private StatisticsChartCacheRepository chartCacheRepo;
     @Autowired private UserShardRepository         userRepo;
     @Autowired private ScoreShardRepository        scoreRepo;
     @Autowired private RegistrationShardRepository regRepo;
@@ -52,6 +51,7 @@ public class StatisticsService {
             try {
                 log.info("[Stats] 启动预热统计缓存...");
                 refreshOverviewCounterTable();
+                refreshChartCacheTables();
                 OverviewVO vo = buildOverview();
                 cachedOverview.set(vo);
                 cacheExpiry = System.currentTimeMillis() + CACHE_TTL_MS;
@@ -123,15 +123,10 @@ public class StatisticsService {
         return vo.getUserCount() == null || vo.getUserCount() == 0L;
     }
 
-    /**
-     * 报名趋势（按学期）：从报名分片聚合 plan_id→count，
-     * 再关联主库 exam_plan 得到学期标签。
-     */
-    public List<ChartItem> registrationTrend() {
+    public void refreshRegistrationTrendCache() {
         Map<Long, Long> planCounts = regRepo.countByPlanId();
         List<ExamPlan> plans = planMapper.selectList(null);
 
-        // 按 "年-学期" 合并（同一学期可能有多个计划）
         Map<String, Long> byTerm = new LinkedHashMap<>();
         plans.stream()
                 .sorted(Comparator.comparingInt(ExamPlan::getExamYear)
@@ -142,9 +137,30 @@ public class StatisticsService {
                     byTerm.merge(label, cnt, Long::sum);
                 });
 
-        return byTerm.entrySet().stream()
-                .map(e -> new ChartItem(e.getKey(), BigDecimal.valueOf(e.getValue())))
-                .collect(Collectors.toList());
+        chartCacheRepo.refreshRegistrationTrend(byTerm);
+    }
+
+    public void refreshCoursePassRateCache() {
+        Map<Long, long[]> stats = scoreRepo.coursePassStats();
+        Map<Long, String> nameMap = new HashMap<>();
+        courseMapper.selectList(null).forEach(c -> nameMap.put(c.getId(), c.getCourseName()));
+        chartCacheRepo.refreshPassRate(stats, nameMap);
+    }
+
+    private void refreshChartCacheTables() {
+        refreshRegistrationTrendCache();
+        refreshCoursePassRateCache();
+    }
+
+    /**
+     * 报名趋势（按学期）：从报名分片聚合 plan_id→count，
+     * 再关联主库 exam_plan 得到学期标签。
+     */
+    public List<ChartItem> registrationTrend() {
+        if (!chartCacheRepo.hasRegistrationTrend()) {
+            refreshRegistrationTrendCache();
+        }
+        return chartCacheRepo.loadRegistrationTrend();
     }
 
     /**
@@ -152,23 +168,10 @@ public class StatisticsService {
      * 再关联主库 sys_course 得到课程名。
      */
     public List<ChartItem> coursePassRate() {
-        Map<Long, long[]> stats = scoreRepo.coursePassStats();
-        // 构造 courseId→name 映射（主库，无需分片）
-        Map<Long, String> nameMap = new HashMap<>();
-        courseMapper.selectList(null).forEach(c -> nameMap.put(c.getId(), c.getCourseName()));
-
-        return stats.entrySet().stream()
-                .filter(e -> e.getValue()[0] > 0)
-                .map(e -> {
-                    String name  = nameMap.getOrDefault(e.getKey(), "课程" + e.getKey());
-                    long   total = e.getValue()[0];
-                    long   pass  = e.getValue()[1];
-                    double rate  = pass * 100.0 / total;
-                    return new ChartItem(name, BigDecimal.valueOf(rate).setScale(1, RoundingMode.HALF_UP));
-                })
-                .sorted((a, b) -> b.getValue().compareTo(a.getValue()))
-                .limit(10)
-                .collect(Collectors.toList());
+        if (!chartCacheRepo.hasPassRate()) {
+            refreshCoursePassRateCache();
+        }
+        return chartCacheRepo.loadPassRate();
     }
 
     /** 专业-计划数分布（主库数据，无需走分片）*/

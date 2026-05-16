@@ -13,6 +13,7 @@ import com.exam.module.course.mapper.CourseMapper;
 import com.exam.module.score.dto.ScoreImportDTO;
 import com.exam.module.score.dto.ScoreQueryDTO;
 import com.exam.module.score.entity.Score;
+import com.exam.module.statistics.service.StatisticsService;
 import com.exam.module.user.entity.User;
 import com.exam.shard.ScoreShardRepository;
 import com.exam.shard.UserShardRepository;
@@ -40,6 +41,9 @@ public class ScoreService {
 
     @Autowired
     private MemoryCacheManager cacheManager;
+
+    @Autowired
+    private StatisticsService statService;
 
     public PageResult<Score> page(ScoreQueryDTO query) {
         // 分页结果短时缓存（30秒），减少重复翻页的 DB 压力
@@ -99,12 +103,16 @@ public class ScoreService {
         }
         // 写后失效该学生的成绩缓存
         evictStudentScoreCache(score.getStudentId());
+        statService.refreshCoursePassRateCache();
     }
 
     public void delete(Long id) {
         Score s = scoreRepo.findById(id);
         if (s != null) scoreRepo.softDeleteById(id);
-        if (s != null) evictStudentScoreCache(s.getStudentId());
+        if (s != null) {
+            evictStudentScoreCache(s.getStudentId());
+            statService.refreshCoursePassRateCache();
+        }
     }
 
     /** 失效某学生的成绩缓存（写操作后调用） */
@@ -170,6 +178,7 @@ public class ScoreService {
                 result.errors.add("第 " + (i + 2) + " 行: " + e.getMessage());
             }
         }
+        statService.refreshCoursePassRateCache();
         return result;
     }
 

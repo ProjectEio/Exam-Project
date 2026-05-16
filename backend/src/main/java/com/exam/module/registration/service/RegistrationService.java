@@ -10,6 +10,7 @@ import com.exam.module.plan.entity.ExamPlan;
 import com.exam.module.plan.mapper.ExamPlanMapper;
 import com.exam.module.registration.dto.RegistrationQueryDTO;
 import com.exam.module.registration.entity.Registration;
+import com.exam.module.statistics.service.StatisticsService;
 import com.exam.module.user.entity.User;
 import com.exam.shard.RegistrationShardRepository;
 import com.exam.shard.UserShardRepository;
@@ -26,6 +27,7 @@ public class RegistrationService {
     @Autowired private RegistrationShardRepository regRepo;
     @Autowired private ExamPlanMapper             planMapper;
     @Autowired private CourseMapper               courseMapper;
+    @Autowired private StatisticsService          statService;
     @Autowired private UserShardRepository        userRepo;
 
     // ── 分页（admin 后台）─────────────────────────────────
@@ -87,6 +89,7 @@ public class RegistrationService {
         planMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<ExamPlan>()
                 .setSql("registered_count = MAX(registered_count - 1, 0)")
                 .eq(ExamPlan::getId, r.getPlanId()));
+        statService.refreshRegistrationTrendCache();
     }
 
     // ── 报名（学生自助）───────────────────────────────────
@@ -139,6 +142,7 @@ public class RegistrationService {
         planMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<ExamPlan>()
                 .setSql("registered_count = registered_count + 1")
                 .eq(ExamPlan::getId, planId));
+        statService.refreshRegistrationTrendCache();
         return r;
     }
 
