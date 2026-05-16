@@ -18,6 +18,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -28,7 +31,7 @@ public class RegistrationService {
     @Autowired private ExamPlanMapper             planMapper;
     @Autowired private CourseMapper               courseMapper;
     @Autowired private StatisticsService          statService;
-    @Autowired private UserShardRepository        userRepo;
+    @Autowired private MemoryCacheManager         cacheManager;
 
     // ── 分页（admin 后台）─────────────────────────────────
 
@@ -73,6 +76,20 @@ public class RegistrationService {
                     .eq(ExamPlan::getId, old.getPlanId()));
         }
         regRepo.updateStatus(id, status, remark, ticketNo, newPayment);
+
+        // 核心修复：确保在事务 Commit 成功后再清理缓存，防止并发请求将未提交的旧数据重新塞入缓存（缓存污染）
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    cacheManager.invalidateAll(MemoryCacheManager.REGISTRATION_CACHE);
+                    cacheManager.invalidateAll(MemoryCacheManager.PAGE_CACHE);
+                }
+            });
+        } else {
+            cacheManager.invalidateAll(MemoryCacheManager.REGISTRATION_CACHE);
+            cacheManager.invalidateAll(MemoryCacheManager.PAGE_CACHE);
+        }
     }
 
     // ── 取消 ──────────────────────────────────────────────

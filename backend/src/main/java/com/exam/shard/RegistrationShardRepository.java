@@ -531,10 +531,8 @@ public class RegistrationShardRepository {
             try {
                 int affected = tpl.update(sql, status, remark, admissionTicketNo, paymentStatus, id);
                 if (affected > 0) {
-                    cache.invalidateAll(CACHE);
-                    cache.invalidateAll(MemoryCacheManager.PAGE_CACHE);
                     refreshOverviewCounts();
-                    // 强制执行 WAL checkpoint，确保数据持久化并对后续跨分片聚合查询可见
+                    // 写操作后立即 Checkpoint
                     checkpointAll();
                     return true;
                 }
@@ -552,8 +550,6 @@ public class RegistrationShardRepository {
                 int affected = tpl.update(
                         "UPDATE sys_registration SET deleted=1,update_time=datetime('now') WHERE id=? AND deleted=0", id);
                 if (affected > 0) {
-                    cache.invalidateAll(CACHE);
-                    cache.invalidateAll(MemoryCacheManager.PAGE_CACHE);
                     refreshOverviewCounts();
                     // 删除后也进行 checkpoint
                     checkpointAll();
