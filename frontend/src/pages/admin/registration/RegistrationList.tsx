@@ -19,6 +19,7 @@ export default function RegistrationList() {
   const [data, setData] = useState<Registration[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
+  const [actionLoadingId, setActionLoadingId] = useState<number | null>(null)
   const [query, setQuery] = useState<any>({
     current: 1, size: 10, keyword: '', status: undefined, paymentStatus: undefined,
   })
@@ -39,10 +40,37 @@ export default function RegistrationList() {
   }
   useEffect(() => { load() }, [query])
 
+  const applyAuditLocally = (id: number, status: Status) => {
+    setData((prev) => {
+      if (query.status === 'PENDING') {
+        return prev.filter((item) => item.id !== id)
+      }
+      return prev.map((item) => {
+        if (item.id !== id) return item
+        return {
+          ...item,
+          status,
+          paymentStatus: status === 'APPROVED' ? 'PAID' : item.paymentStatus,
+        }
+      })
+    })
+    if (query.status === 'PENDING') {
+      setTotal((prev) => Math.max(0, prev - 1))
+    }
+  }
+
   const onApprove = async (id: number) => {
-    await auditReg(id, 'APPROVED')
-    message.success('已通过')
-    load()
+    setActionLoadingId(id)
+    try {
+      await auditReg(id, 'APPROVED')
+      applyAuditLocally(id, 'APPROVED')
+      message.success('已通过')
+      await load()
+    } catch {
+      message.error('审核失败')
+    } finally {
+      setActionLoadingId(null)
+    }
   }
   const onRejectOpen = (r: Registration) => {
     setRejectTarget(r)
@@ -51,10 +79,19 @@ export default function RegistrationList() {
   }
   const onRejectOk = async () => {
     const v = await form.validateFields()
-    await auditReg(rejectTarget!.id, 'REJECTED', v.remark)
-    message.success('已拒绝')
-    setRejectOpen(false)
-    load()
+    if (!rejectTarget) return
+    setActionLoadingId(rejectTarget.id)
+    try {
+      await auditReg(rejectTarget.id, 'REJECTED', v.remark)
+      applyAuditLocally(rejectTarget.id, 'REJECTED')
+      message.success('已拒绝')
+      setRejectOpen(false)
+      await load()
+    } catch {
+      message.error('审核失败')
+    } finally {
+      setActionLoadingId(null)
+    }
   }
   const onCancel = async (id: number) => {
     await cancelReg(id)
@@ -123,8 +160,8 @@ export default function RegistrationList() {
         <Space wrap>
           {r.status === 'PENDING' && (
             <>
-              <Button size="small" type="primary" icon={<CheckOutlined />} onClick={() => onApprove(r.id)}>通过</Button>
-              <Button size="small" danger icon={<CloseOutlined />} onClick={() => onRejectOpen(r)}>拒绝</Button>
+              <Button size="small" type="primary" icon={<CheckOutlined />} loading={actionLoadingId === r.id} onClick={() => onApprove(r.id)}>通过</Button>
+              <Button size="small" danger icon={<CloseOutlined />} disabled={actionLoadingId === r.id} onClick={() => onRejectOpen(r)}>拒绝</Button>
             </>
           )}
           {r.status === 'APPROVED' && (
@@ -171,7 +208,7 @@ export default function RegistrationList() {
       </Card>
 
       <Modal title="填写拒绝原因" open={rejectOpen}
-        onCancel={() => setRejectOpen(false)} onOk={onRejectOk} destroyOnClose>
+        onCancel={() => setRejectOpen(false)} onOk={onRejectOk} confirmLoading={rejectTarget != null && actionLoadingId === rejectTarget.id} destroyOnClose>
         <Form form={form} layout="vertical" preserve={false}>
           <Form.Item label="审核备注" name="remark" rules={[{ required: true, message: '请填写拒绝原因' }]}>
             <Input.TextArea rows={3} placeholder="请说明拒绝该报名的原因" />
