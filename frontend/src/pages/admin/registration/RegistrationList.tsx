@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Table, Button, Input, Space, Tag, Modal, Form, Popconfirm, App, Select, Card,
 } from 'antd'
@@ -26,19 +26,24 @@ export default function RegistrationList() {
   const [rejectOpen, setRejectOpen] = useState(false)
   const [rejectTarget, setRejectTarget] = useState<Registration | null>(null)
   const [form] = Form.useForm()
+  const latestLoadIdRef = useRef(0)
   const initialLoading = loading && data.length === 0
 
-  const load = async () => {
+  const load = async (nextQuery = query) => {
+    const loadId = ++latestLoadIdRef.current
     setLoading(true)
     try {
-      const res = await pageReg(query)
+      const res = await pageReg(nextQuery)
+      if (loadId !== latestLoadIdRef.current) return
       setData(res.data.records)
       setTotal(res.data.total)
     } finally {
-      setLoading(false)
+      if (loadId === latestLoadIdRef.current) {
+        setLoading(false)
+      }
     }
   }
-  useEffect(() => { load() }, [query])
+  useEffect(() => { void load(query) }, [query])
 
   const applyAuditLocally = (id: number, status: Status) => {
     setData((prev) => {
@@ -65,7 +70,7 @@ export default function RegistrationList() {
       await auditReg(id, 'APPROVED')
       applyAuditLocally(id, 'APPROVED')
       message.success('已通过')
-      await load()
+      await load(query)
     } catch {
       message.error('审核失败')
     } finally {
@@ -86,7 +91,7 @@ export default function RegistrationList() {
       applyAuditLocally(rejectTarget.id, 'REJECTED')
       message.success('已拒绝')
       setRejectOpen(false)
-      await load()
+      await load(query)
     } catch {
       message.error('审核失败')
     } finally {

@@ -413,7 +413,7 @@ public class DataGeneratorService {
                     String regNo = "R" + shardIdx + "-" + studentId + "-" + planId;
                     String payStatus = PAY_STATUS[rnd.nextInt(2)];
                     String status    = REG_STATUS[rnd.nextInt(3)];
-                    String ticketNo  = "APPROVED".equals(status) ? buildTicketNo(plan, studentId) : null;
+                        String ticketNo  = buildTicketNo(plan, studentId);
                     batch.add(new Object[]{
                             studentId,
                             planId,

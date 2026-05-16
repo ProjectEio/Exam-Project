@@ -126,6 +126,7 @@ public class RegistrationService {
         r.setStudentId(sid);
         r.setPlanId(planId);
         r.setRegistrationNo(buildRegNo(plan, sid));
+        r.setAdmissionTicketNo(buildTicketNo(plan, sid));
         r.setPaymentStatus("UNPAID");
         r.setStatus("PENDING");
         r.setRegisterTime(LocalDateTime.now());

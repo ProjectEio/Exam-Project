@@ -1,6 +1,7 @@
 package com.exam.config;
 
 import com.exam.benchmark.DataGeneratorService;
+import com.exam.shard.RegistrationShardRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -36,6 +37,7 @@ public class DatabaseInitializer {
     private static final String DATA_DIR       = "data";
     private static final String MARKER_SCHEMA  = DATA_DIR + "/exam.meta.initialized";
     private static final String MARKER_DATA    = DATA_DIR + "/exam.data.generated";
+    private static final String MARKER_TICKET  = DATA_DIR + "/exam.ticket.backfilled";
 
     private final DataSource dataSource;
 
@@ -54,6 +56,9 @@ public class DatabaseInitializer {
     @Lazy
     @Autowired
     private DataGeneratorService dataGeneratorService;
+
+    @Autowired
+    private RegistrationShardRepository registrationShardRepository;
 
     @Value("${shard.base-path:./}")
     private String basePath;
@@ -83,6 +88,7 @@ public class DatabaseInitializer {
             resetRegistrationShards();
             // 同时清除数据标志（重建 schema 必须重新生成数据）
             Files.deleteIfExists(Paths.get(MARKER_DATA));
+            Files.deleteIfExists(Paths.get(MARKER_TICKET));
 
             try (Connection conn = dataSource.getConnection()) {
                 log.info("[DB Init] 执行 schema-meta.sql ...");
@@ -100,6 +106,7 @@ public class DatabaseInitializer {
         Path dataMarker = Paths.get(MARKER_DATA);
         if (Files.exists(dataMarker)) {
             log.info("[DB Init] 2000万数据已存在，跳过生成（删除 {} 可重新生成）", dataMarker.toAbsolutePath());
+            scheduleTicketBackfillIfNeeded();
         } else {
             log.info("[DB Init] 启动后台 2000万数据生成任务...");
             Thread genThread = new Thread(() -> {
@@ -116,6 +123,9 @@ public class DatabaseInitializer {
                             + "\nusers="  + dataGeneratorService.getUserInserted()
                             + "\nscores=" + dataGeneratorService.getScoreInserted()
                             + "\nregs="   + dataGeneratorService.getRegInserted());
+                    Files.writeString(Paths.get(MARKER_TICKET),
+                            "ticket source ok at " + java.time.LocalDateTime.now()
+                            + "\nmode=generated_with_ticket");
                     log.info("===== [DataGen] 全量数据生成完成，标志已写入 =====");
                 } catch (Exception e) {
                     log.error("[DataGen] 数据生成失败", e);
@@ -166,6 +176,29 @@ public class DatabaseInitializer {
                 log.warn("[DB Init] 重置 reg 分片失败: {}", e.getMessage());
             }
         }
+    }
+
+    private void scheduleTicketBackfillIfNeeded() {
+        Path ticketMarker = Paths.get(MARKER_TICKET);
+        if (Files.exists(ticketMarker)) {
+            log.info("[DB Init] 准考证号已回填，跳过（删除 {} 可重新执行）", ticketMarker.toAbsolutePath());
+            return;
+        }
+
+        Thread ticketThread = new Thread(() -> {
+            try {
+                log.info("[DB Init] 开始回填历史准考证号...");
+                long updated = registrationShardRepository.backfillMissingAdmissionTicketNos();
+                Files.writeString(ticketMarker,
+                        "backfilled at " + java.time.LocalDateTime.now()
+                        + "\nupdated=" + updated);
+                log.info("[DB Init] 历史准考证号回填完成，更新 {} 条", updated);
+            } catch (Exception e) {
+                log.error("[DB Init] 历史准考证号回填失败", e);
+            }
+        }, "ticket-backfill");
+        ticketThread.setDaemon(true);
+        ticketThread.start();
     }
 }
 

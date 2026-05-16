@@ -248,6 +248,36 @@ public class RegistrationShardRepository {
     public int           getNumShards()            { return templates.length; }
     public ShardRouter   getRouter()               { return router; }
 
+    public long backfillMissingAdmissionTicketNos() {
+        String sql = """
+                UPDATE sys_registration
+                   SET admission_ticket_no = 'AT'
+                       || printf('%04d', exam_year)
+                       || CASE exam_term WHEN '上' THEN '01' ELSE '02' END
+                       || printf('%04d', plan_id)
+                       || printf('%04d', abs(student_id) % 10000),
+                       update_time = datetime('now')
+                 WHERE deleted = 0
+                   AND (admission_ticket_no IS NULL OR admission_ticket_no = '')
+                   AND exam_year IS NOT NULL
+                   AND plan_id IS NOT NULL
+                   AND exam_term IN ('上', '下')
+                """;
+        long total = 0L;
+        for (JdbcTemplate tpl : templates) {
+            try {
+                total += tpl.update(sql);
+            } catch (Exception e) {
+                log.warn("Registration ticket backfill shard error: {}", e.getMessage());
+            }
+        }
+        if (total > 0) {
+            cache.invalidateAll(CACHE);
+            cache.invalidateAll(MemoryCacheManager.PAGE_CACHE);
+        }
+        return total;
+    }
+
     /**
      * 按计划聚合报名数，返回 planId → count。
      * 供 StatisticsService 构建报名趋势图（按学期分组）。
@@ -502,6 +532,7 @@ public class RegistrationShardRepository {
                 int affected = tpl.update(sql, status, remark, admissionTicketNo, paymentStatus, id);
                 if (affected > 0) {
                     cache.invalidateAll(CACHE);
+                    cache.invalidateAll(MemoryCacheManager.PAGE_CACHE);
                     refreshOverviewCounts();
                     return true;
                 }
@@ -520,6 +551,7 @@ public class RegistrationShardRepository {
                         "UPDATE sys_registration SET deleted=1,update_time=datetime('now') WHERE id=? AND deleted=0", id);
                 if (affected > 0) {
                     cache.invalidateAll(CACHE);
+                    cache.invalidateAll(MemoryCacheManager.PAGE_CACHE);
                     refreshOverviewCounts();
                     return true;
                 }
