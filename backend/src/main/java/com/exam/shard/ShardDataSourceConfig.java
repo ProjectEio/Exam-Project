@@ -184,6 +184,19 @@ public class ShardDataSourceConfig {
                     AND OLD.status='PASS';
                 END
                 """);
+                        stmt.execute("""
+                                CREATE TRIGGER IF NOT EXISTS trg_score_status
+                                AFTER UPDATE OF status ON sys_score
+                                WHEN NEW.deleted=0 AND OLD.deleted=0 AND NEW.status<>OLD.status
+                                BEGIN
+                                    UPDATE shard_count_cache SET value=MAX(0,value-1) WHERE key='total_pass'
+                                        AND OLD.status='PASS';
+                                    UPDATE shard_count_cache SET value=value+1 WHERE key='total_pass'
+                                        AND NEW.status='PASS';
+                                END
+                                """);
+                        stmt.execute("UPDATE shard_count_cache SET value=(SELECT COUNT(*) FROM sys_score WHERE deleted=0) WHERE key='total_score'");
+                        stmt.execute("UPDATE shard_count_cache SET value=(SELECT COUNT(*) FROM sys_score WHERE deleted=0 AND status='PASS') WHERE key='total_pass'");
             log.info("Score 分片 [{}] schema 就绪", idx);
         } catch (SQLException e) {
             throw new RuntimeException("Score shard[" + idx + "] 初始化失败", e);
@@ -284,6 +297,36 @@ public class ShardDataSourceConfig {
                     AND OLD.payment_status='PAID';
                 END
                 """);
+                        stmt.execute("""
+                                CREATE TRIGGER IF NOT EXISTS trg_reg_status_upd
+                                AFTER UPDATE OF status ON sys_registration
+                                WHEN NEW.deleted=0 AND OLD.deleted=0 AND NEW.status<>OLD.status
+                                BEGIN
+                                    UPDATE shard_count_cache SET value=MAX(0,value-1) WHERE key='total_reg_approved'
+                                        AND OLD.status='APPROVED';
+                                    UPDATE shard_count_cache SET value=MAX(0,value-1) WHERE key='total_reg_pending'
+                                        AND OLD.status='PENDING';
+                                    UPDATE shard_count_cache SET value=value+1 WHERE key='total_reg_approved'
+                                        AND NEW.status='APPROVED';
+                                    UPDATE shard_count_cache SET value=value+1 WHERE key='total_reg_pending'
+                                        AND NEW.status='PENDING';
+                                END
+                                """);
+                        stmt.execute("""
+                                CREATE TRIGGER IF NOT EXISTS trg_reg_payment_upd
+                                AFTER UPDATE OF payment_status ON sys_registration
+                                WHEN NEW.deleted=0 AND OLD.deleted=0 AND NEW.payment_status<>OLD.payment_status
+                                BEGIN
+                                    UPDATE shard_count_cache SET value=MAX(0,value-1) WHERE key='total_reg_paid'
+                                        AND OLD.payment_status='PAID';
+                                    UPDATE shard_count_cache SET value=value+1 WHERE key='total_reg_paid'
+                                        AND NEW.payment_status='PAID';
+                                END
+                                """);
+                        stmt.execute("UPDATE shard_count_cache SET value=(SELECT COUNT(*) FROM sys_registration WHERE deleted=0) WHERE key='total_reg'");
+                        stmt.execute("UPDATE shard_count_cache SET value=(SELECT COUNT(*) FROM sys_registration WHERE deleted=0 AND status='APPROVED') WHERE key='total_reg_approved'");
+                        stmt.execute("UPDATE shard_count_cache SET value=(SELECT COUNT(*) FROM sys_registration WHERE deleted=0 AND status='PENDING') WHERE key='total_reg_pending'");
+                        stmt.execute("UPDATE shard_count_cache SET value=(SELECT COUNT(*) FROM sys_registration WHERE deleted=0 AND payment_status='PAID') WHERE key='total_reg_paid'");
             log.info("Registration 分片 [{}] schema 就绪", idx);
         } catch (SQLException e) {
             throw new RuntimeException("Registration shard[" + idx + "] 初始化失败", e);

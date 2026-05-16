@@ -1,10 +1,12 @@
 package com.exam.benchmark;
 
+import com.exam.module.statistics.repository.OverviewCountRepository;
 import com.exam.shard.RegistrationShardRepository;
 import com.exam.shard.ScoreShardRepository;
 import com.exam.shard.ShardDataSourceConfig;
 import com.exam.shard.ShardRouter;
 import com.exam.shard.UserShardDataSourceConfig;
+import com.exam.shard.UserShardRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -55,6 +57,8 @@ public class DataGeneratorService {
 
     @Autowired private ScoreShardRepository        scoreRepo;
     @Autowired private RegistrationShardRepository regRepo;
+    @Autowired private UserShardRepository         userRepo;
+    @Autowired private OverviewCountRepository     overviewCountRepo;
 
     /** 用户分片数据源（generateUsers 直接批量写入，绕过 ORM 开销） */
     @Autowired
@@ -225,6 +229,7 @@ public class DataGeneratorService {
             try { f.get(); } catch (Exception e) { log.error("[UserGen] 分片写入失败", e); }
         }
         log.info("[UserGen] 完成，共写入 {} 条", userInserted.get());
+        overviewCountRepo.refreshUserCounts(userRepo.countAll(), userRepo.countByRole("STUDENT"));
     }
 
     // ─────────────────────────────────────────────────────
@@ -259,6 +264,10 @@ public class DataGeneratorService {
             try { total += f.get(); } catch (Exception e) { log.error("Score 生成出错", e); }
         }
         pool.shutdown();
+        Map<String, Object> scoreStats = scoreRepo.globalStats();
+        overviewCountRepo.refreshScoreCounts(
+                toLong(scoreStats.get("totalCount")),
+                toLong(scoreStats.get("passCount")));
         log.info("Score 生成完成，共写入 {} 条", total);
     }
 
@@ -370,6 +379,10 @@ public class DataGeneratorService {
         }
         pool.shutdown();
         syncRegisteredCount();
+        Map<String, Object> regStats = regRepo.globalStats();
+        overviewCountRepo.refreshRegistrationCounts(
+            toLong(regStats.get("totalCount")),
+            toLong(regStats.get("approvedCount")));
         log.info("Registration 生成完成，共写入 {} 条", total);
     }
 
@@ -487,6 +500,14 @@ public class DataGeneratorService {
         scoreInserted.set(0);
         regInserted.set(0);
         log.info("所有分片数据已清空");
+        overviewCountRepo.refreshScoreCounts(0L, 0L);
+        overviewCountRepo.refreshRegistrationCounts(0L, 0L);
+    }
+
+    private long toLong(Object v) {
+        if (v == null) return 0L;
+        if (v instanceof Number n) return n.longValue();
+        try { return Long.parseLong(v.toString()); } catch (Exception e) { return 0L; }
     }
 
     private Map<Long, CourseMeta> loadCourseMetaMap() {

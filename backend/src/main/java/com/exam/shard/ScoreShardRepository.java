@@ -2,6 +2,7 @@ package com.exam.shard;
 
 import com.exam.cache.MemoryCacheManager;
 import com.exam.common.PageResult;
+import com.exam.module.statistics.repository.OverviewCountRepository;
 import com.exam.module.score.dto.ScoreQueryDTO;
 import com.exam.module.score.entity.Score;
 import org.slf4j.Logger;
@@ -44,6 +45,7 @@ public class ScoreShardRepository {
     private final ShardRouter        router;
     private final ExecutorService    executor;
     private final MemoryCacheManager cache;
+    private final OverviewCountRepository overviewCountRepo;
 
     private static final String SCORE_COLS =
             "id,student_id,course_id,plan_id,exam_year,exam_term,score,status,exam_date,student_name,course_code,course_name";
@@ -70,8 +72,10 @@ public class ScoreShardRepository {
     @Autowired
     public ScoreShardRepository(
             @Qualifier("scoreShardDataSources") DataSource[] dataSources,
-            MemoryCacheManager cache) {
+            MemoryCacheManager cache,
+            OverviewCountRepository overviewCountRepo) {
         this.cache     = cache;
+        this.overviewCountRepo = overviewCountRepo;
         this.templates = new JdbcTemplate[dataSources.length];
         for (int i = 0; i < dataSources.length; i++) {
             templates[i] = new JdbcTemplate(dataSources[i]);
@@ -261,6 +265,7 @@ public class ScoreShardRepository {
                 "INSERT OR IGNORE INTO sys_score(student_id,course_id,plan_id,exam_year,exam_term,score,status,exam_date) VALUES(?,?,?,?,?,?,?,?)",
                 studentId, courseId, planId, examYear, examTerm, score, status, examDate);
         evict(studentId);
+        refreshOverviewCounts();
     }
 
     public int batchInsert(int shardIdx, List<Object[]> rows) {
@@ -280,13 +285,17 @@ public class ScoreShardRepository {
                 score.getStudentId(), score.getCourseId(), score.getPlanId(), score.getExamYear(), score.getExamTerm(),
                 score.getScore(), score.getStatus(), score.getExamDate(), score.getStudentName(), score.getCourseCode(), score.getCourseName());
         evict(score.getStudentId());
+        refreshOverviewCounts();
     }
 
     public int delete(long studentId, long scoreId) {
         int shard = router.route(studentId);
         int affected = templates[shard].update(
                 "UPDATE sys_score SET deleted=1 WHERE id=? AND student_id=?", scoreId, studentId);
-        if (affected > 0) evict(studentId);
+        if (affected > 0) {
+            evict(studentId);
+            refreshOverviewCounts();
+        }
         return affected;
     }
 
@@ -303,6 +312,7 @@ public class ScoreShardRepository {
         if (!Objects.equals(old.getStudentId(), score.getStudentId()) && score.getStudentId() != null) {
             evict(score.getStudentId());
         }
+        refreshOverviewCounts();
     }
 
     public void upsertByUniqueKey(Score score) {
@@ -318,6 +328,7 @@ public class ScoreShardRepository {
                     score.getScore(), score.getStatus(), score.getExamDate(), score.getPlanId(), score.getStudentName(), score.getCourseCode(), score.getCourseName(),
                     score.getStudentId(), score.getCourseId(), score.getExamYear(), score.getExamTerm());
             evict(score.getStudentId());
+            refreshOverviewCounts();
         } else {
                 insert(score);
         }
@@ -345,6 +356,13 @@ public class ScoreShardRepository {
         cache.remove(CACHE, "shard:sc:status:dist");
         cache.remove(CACHE, "shard:sc:course:pass:stats");
         cache.invalidateAll(MemoryCacheManager.PAGE_CACHE);
+    }
+
+    private void refreshOverviewCounts() {
+        Map<String, Object> stats = globalStats();
+        overviewCountRepo.refreshScoreCounts(
+                toLong(stats.get("totalCount")),
+                toLong(stats.get("passCount")));
     }
 
     // ════════════════════════════════════════════════════

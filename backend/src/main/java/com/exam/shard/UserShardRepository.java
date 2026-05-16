@@ -2,6 +2,7 @@ package com.exam.shard;
 
 import com.exam.cache.MemoryCacheManager;
 import com.exam.common.PageResult;
+import com.exam.module.statistics.repository.OverviewCountRepository;
 import com.exam.module.user.dto.UserQueryDTO;
 import com.exam.module.user.entity.User;
 import org.slf4j.Logger;
@@ -82,13 +83,15 @@ public class UserShardRepository {
     private final JdbcTemplate[]  shards;
     private final ShardRouter      router;
     private final MemoryCacheManager cache;
+    private final OverviewCountRepository overviewCountRepo;
     private final ExecutorService  pool;
     private final AtomicLong       nextIdGen;
 
     @Autowired
     public UserShardRepository(
             @Qualifier("userShardDataSources") DataSource[] userShardDataSources,
-            MemoryCacheManager cache) {
+            MemoryCacheManager cache,
+            OverviewCountRepository overviewCountRepo) {
 
         this.shards = new JdbcTemplate[NUM_SHARDS];
         for (int i = 0; i < NUM_SHARDS; i++) {
@@ -96,6 +99,7 @@ public class UserShardRepository {
         }
         this.router = new ShardRouter(NUM_SHARDS);
         this.cache  = cache;
+        this.overviewCountRepo = overviewCountRepo;
         this.pool   = new ThreadPoolExecutor(
                 NUM_SHARDS, NUM_SHARDS * 2,
                 60L, TimeUnit.SECONDS,
@@ -412,6 +416,7 @@ public class UserShardRepository {
         cache.remove(MemoryCacheManager.USER_CACHE, "u:exists:" + user.getUsername());
         evictUserCountCaches();
         cache.invalidateAll(MemoryCacheManager.PAGE_CACHE);
+        refreshOverviewCounts();
     }
 
     /** 更新用户信息 */
@@ -432,6 +437,7 @@ public class UserShardRepository {
         cache.remove(MemoryCacheManager.USER_CACHE, "u:id:" + user.getId());
         evictUserCountCaches();
         cache.invalidateAll(MemoryCacheManager.PAGE_CACHE);
+        refreshOverviewCounts();
     }
 
     /** 软删除 */
@@ -441,6 +447,7 @@ public class UserShardRepository {
         cache.remove(MemoryCacheManager.USER_CACHE, "u:id:" + id);
         evictUserCountCaches();
         cache.invalidateAll(MemoryCacheManager.PAGE_CACHE);
+        refreshOverviewCounts();
     }
 
     private void evictUserCountCaches() {
@@ -452,6 +459,10 @@ public class UserShardRepository {
         cache.remove(MemoryCacheManager.USER_CACHE, "u:special:low:all");
         cache.remove(MemoryCacheManager.USER_CACHE, "u:special:high:student");
         cache.remove(MemoryCacheManager.USER_CACHE, "u:special:low:student");
+    }
+
+    private void refreshOverviewCounts() {
+        overviewCountRepo.refreshUserCounts(countAll(), countByRole("STUDENT"));
     }
 
     // ═══════════════════════════════════════════════════════

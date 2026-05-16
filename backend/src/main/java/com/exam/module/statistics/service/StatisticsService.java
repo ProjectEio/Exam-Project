@@ -3,6 +3,7 @@ package com.exam.module.statistics.service;
 import com.exam.module.statistics.dto.ChartItem;
 import com.exam.module.statistics.dto.OverviewVO;
 import com.exam.module.statistics.mapper.StatisticsMapper;
+import com.exam.module.statistics.repository.OverviewCountRepository;
 import com.exam.module.course.mapper.CourseMapper;
 import com.exam.module.plan.mapper.ExamPlanMapper;
 import com.exam.module.plan.entity.ExamPlan;
@@ -30,6 +31,7 @@ public class StatisticsService {
     private static final long CACHE_TTL_MS = 60_000L;
 
     @Autowired private StatisticsMapper            statMapper;
+    @Autowired private OverviewCountRepository     overviewCountRepo;
     @Autowired private UserShardRepository         userRepo;
     @Autowired private ScoreShardRepository        scoreRepo;
     @Autowired private RegistrationShardRepository regRepo;
@@ -49,6 +51,7 @@ public class StatisticsService {
         Thread t = new Thread(() -> {
             try {
                 log.info("[Stats] 启动预热统计缓存...");
+                refreshOverviewCounterTable();
                 OverviewVO vo = buildOverview();
                 cachedOverview.set(vo);
                 cacheExpiry = System.currentTimeMillis() + CACHE_TTL_MS;
@@ -81,40 +84,43 @@ public class StatisticsService {
         if (cached != null && now < cacheExpiry) return cached;
         // 缓存失效或未预热，同步重建并写入
         OverviewVO vo = buildOverview();
+        if (isEmptyOverview(vo)) {
+            refreshOverviewCounterTable();
+            vo = buildOverview();
+        }
         cachedOverview.set(vo);
         cacheExpiry = now + CACHE_TTL_MS;
         return vo;
     }
 
-    /** 实际从分片 + 主库聚合统计数据 */
+    /** 直接从总览计数表读取首页数据，避免 cache miss 时 fan-out 分片。 */
     private OverviewVO buildOverview() {
-        // 成绩分片数据（含 pass数）
-        Map<String, Object> scoreStats = scoreRepo.globalStats();
-        long scoreTotal = toLong(scoreStats.get("totalCount"));
-        long scorePass  = toLong(scoreStats.get("passCount"));
-        // 报名分片数据（含 approved）
-        Map<String, Object> regStats = regRepo.globalStats();
-        long regTotal    = toLong(regStats.get("totalCount"));
-        long regApproved = toLong(regStats.get("approvedCount"));
-
-        OverviewVO vo = new OverviewVO();
-        vo.setUserCount(userRepo.countAll());
-        vo.setStudentCount(userRepo.countByRole("STUDENT"));
-        vo.setMajorCount(statMapper.countMajor());
-        vo.setCourseCount(statMapper.countCourse());
-        vo.setPlanCount(statMapper.countPlan());
-        vo.setPublishedPlanCount(statMapper.countPublishedPlan());
-        vo.setRegistrationCount(regTotal);
-        vo.setApprovedCount(regApproved);
-        vo.setScoreCount(scoreTotal);
-        vo.setPassRate(scoreTotal == 0 ? 0.0 : Math.round(scorePass * 1000.0 / scoreTotal) / 10.0);
-        return vo;
+        return overviewCountRepo.loadOverview();
     }
 
     private static long toLong(Object v) {
         if (v == null) return 0L;
         if (v instanceof Number n) return n.longValue();
         try { return Long.parseLong(v.toString()); } catch (Exception e) { return 0L; }
+    }
+
+    private void refreshOverviewCounterTable() {
+        overviewCountRepo.ensureMetadataSupport();
+        overviewCountRepo.refreshUserCounts(userRepo.countAll(), userRepo.countByRole("STUDENT"));
+
+        Map<String, Object> scoreStats = scoreRepo.globalStats();
+        overviewCountRepo.refreshScoreCounts(
+                toLong(scoreStats.get("totalCount")),
+                toLong(scoreStats.get("passCount")));
+
+        Map<String, Object> regStats = regRepo.globalStats();
+        overviewCountRepo.refreshRegistrationCounts(
+                toLong(regStats.get("totalCount")),
+                toLong(regStats.get("approvedCount")));
+    }
+
+    private boolean isEmptyOverview(OverviewVO vo) {
+        return vo.getUserCount() == null || vo.getUserCount() == 0L;
     }
 
     /**

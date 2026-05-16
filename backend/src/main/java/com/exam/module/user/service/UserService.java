@@ -63,9 +63,9 @@ public class UserService {
 
     public void resetPassword(Long id, String newPwd) {
         if (!StringUtils.hasText(newPwd)) throw new BizException("新密码不能为空");
-        User u = new User();
-        u.setId(id);
-        u.setPassword(passwordEncoder.encode(newPwd));
-        userRepo.update(u);
+        User exist = userRepo.findById(id);
+        if (exist == null) throw new BizException("用户不存在");
+        exist.setPassword(passwordEncoder.encode(newPwd));
+        userRepo.update(exist);
     }
 }

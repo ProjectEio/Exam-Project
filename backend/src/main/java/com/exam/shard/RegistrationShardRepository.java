@@ -4,6 +4,7 @@ import com.exam.cache.MemoryCacheManager;
 import com.exam.common.PageResult;
 import com.exam.module.registration.dto.RegistrationQueryDTO;
 import com.exam.module.registration.entity.Registration;
+import com.exam.module.statistics.repository.OverviewCountRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -41,6 +42,7 @@ public class RegistrationShardRepository {
     private final ShardRouter        router;
     private final ExecutorService    executor;
     private final MemoryCacheManager cache;
+    private final OverviewCountRepository overviewCountRepo;
 
     private static final String REG_SELECT_COLS =
             "id,student_id,plan_id,registration_no,admission_ticket_no,"
@@ -78,8 +80,10 @@ public class RegistrationShardRepository {
     @Autowired
     public RegistrationShardRepository(
             @Qualifier("regShardDataSources") DataSource[] dataSources,
-            MemoryCacheManager cache) {
+            MemoryCacheManager cache,
+            OverviewCountRepository overviewCountRepo) {
         this.cache     = cache;
+        this.overviewCountRepo = overviewCountRepo;
         this.templates = new JdbcTemplate[dataSources.length];
         for (int i = 0; i < dataSources.length; i++) {
             this.templates[i] = new JdbcTemplate(dataSources[i]);
@@ -187,6 +191,7 @@ public class RegistrationShardRepository {
                 "INSERT OR IGNORE INTO sys_registration(student_id,plan_id,registration_no,payment_status,status) VALUES(?,?,?,?,?)",
                 studentId, planId, registrationNo, paymentStatus, status);
         evict(studentId);
+        refreshOverviewCounts();
     }
 
     public void insert(Registration registration) {
@@ -199,6 +204,7 @@ public class RegistrationShardRepository {
                 registration.getPlanCode(), registration.getPlanName(), registration.getCourseName(),
                 registration.getExamDate(), registration.getExamLocation(), registration.getStartTime(), registration.getEndTime());
         evict(registration.getStudentId());
+        refreshOverviewCounts();
     }
 
     public boolean existsByStudentAndPlan(long studentId, long planId) {
@@ -496,6 +502,7 @@ public class RegistrationShardRepository {
                 int affected = tpl.update(sql, status, remark, admissionTicketNo, paymentStatus, id);
                 if (affected > 0) {
                     cache.invalidateAll(CACHE);
+                    refreshOverviewCounts();
                     return true;
                 }
             } catch (Exception e) { log.warn("Registration updateStatus shard error: {}", e.getMessage()); }
@@ -513,6 +520,7 @@ public class RegistrationShardRepository {
                         "UPDATE sys_registration SET deleted=1,update_time=datetime('now') WHERE id=? AND deleted=0", id);
                 if (affected > 0) {
                     cache.invalidateAll(CACHE);
+                    refreshOverviewCounts();
                     return true;
                 }
             } catch (Exception e) { log.warn("Registration softDelete shard error: {}", e.getMessage()); }
@@ -532,6 +540,13 @@ public class RegistrationShardRepository {
             try { return f.get(30, TimeUnit.SECONDS); }
             catch (Exception e) { return 0L; }
         }).sum();
+    }
+
+    private void refreshOverviewCounts() {
+        Map<String, Object> stats = globalStats();
+        overviewCountRepo.refreshRegistrationCounts(
+                toLong(stats.get("totalCount")),
+                toLong(stats.get("approvedCount")));
     }
 
     private long countWithQuery(int[] shards, String whereStr, Object[] baseArr) {
